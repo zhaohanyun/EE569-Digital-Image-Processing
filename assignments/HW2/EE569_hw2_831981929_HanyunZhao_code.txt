@@ -1,0 +1,1017 @@
+#ifndef EE569_HW2_8831981929_HANYUNZHAO_FILEIO_H
+#define EE569_HW2_8831981929_HANYUNZHAO_FILEIO_H
+#include <stdio.h>
+#include <iostream>
+#include <fstream>
+#include <stdlib.h>
+#include <fstream>
+#include <string>
+using namespace std;
+
+//unsigned char *** AllocateMem(int=3, int=481, int=321);
+//
+//double *** AllocateMemDouble(int=3, int=481, int height=321);
+template<typename T> T *** AllocateMem(int BytesPerPixel=3, int width=481, int height=321){
+    // Allocate image data array
+    T ***Imagedata;
+    Imagedata=new T **[height];
+    int i,j,k;
+    int cnt=0;
+    for(i=0; i<height; i++)
+    {
+        Imagedata[i]=new T *[width];
+        for(j=0; j<width; j++) {
+            Imagedata[i][j] = new T[BytesPerPixel];
+            for(k=0;k<BytesPerPixel;k++){
+                Imagedata[i][j][k]=0;
+            }
+        }
+    }
+    return Imagedata;
+}
+
+
+//void LoadImage(unsigned char ***, string, int=3, int=481, int=321);
+void LoadImage(unsigned char ***Imagedata, string FilePath,int BytesPerPixel=3,  int width=481, int height=321){
+    ifstream file;
+    file.open(FilePath,ios::in | ios::binary);
+    int i,j,k;
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                file>>noskipws>>Imagedata[i][j][k];
+            }
+        }
+    }
+    file.close();
+}
+
+//void ImageOutput(unsigned char ***, string, int=3 , int=481, int=321);
+void OutputImage(unsigned char ***ImagedataOut,string FilePath, int BytesPerPixel=3,  int width=481, int height=321){
+    ofstream fileout;
+    int i,j,k;
+    fileout.open(FilePath,ios::binary);
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                fileout<<noskipws<<ImagedataOut[i][j][k];
+            }
+        }
+    }
+    fileout.close();
+}
+
+//template<typename T> void FreeImage(T ***, int=3, int=481, int=321);
+template<typename T> void FreeImage(T ***Imagedata, int BytesPerPixel=3, int width=481, int height=321){
+    int i,j,k;
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++){
+            delete [] Imagedata[i][j];
+        }
+    }
+    for(i=0; i<height; i++) {
+        delete [] Imagedata[i];
+    }
+    delete [] Imagedata;
+}
+
+#endif //EE569_HW2_8831981929_HANYUNZHAO_FILEIO_H
+
+#include <iostream>
+#include "fileIO.h"
+#include <cmath>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/highgui.hpp>
+#include <string>
+#include "fileIO.h"
+using namespace std;
+using namespace cv;
+
+int width=481;
+int height=321;
+
+
+int main() {
+    int BytesPerPixel = 3;
+    int width = 481;
+    int height = 321;
+    int i, j, k;
+
+    unsigned char***ImageData=AllocateMem<unsigned char>();//original image
+    unsigned char***ImageOutput=AllocateMem<unsigned char>(1);//output of gradient map
+
+    string PathInput="HW2_images/Pig.jpg";
+    string PathOutput="Output/PigCanny-250-300.raw";
+
+    LoadImage(ImageData,PathInput);
+
+    Mat imagein=imread(PathInput);
+    Mat imageout;
+    cv::Canny(imagein,imageout,250,300);
+
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            ImageOutput[i][j][0]=imageout.at<uchar>(i,j);
+        }
+    }
+    OutputImage(ImageOutput,PathOutput,1);
+
+    FreeImage<unsigned char>(ImageData);
+    FreeImage<unsigned char>(ImageOutput);
+
+    return 0;
+
+#include <iostream>
+#include "fileIO.h"
+#include <cmath>
+#include <random>
+
+unsigned char bit_interleave(unsigned char a, unsigned char b){
+    unsigned char result=0;
+    result+=(a<<4) & 0b10000000;
+    result+=(b<<3) & 0b01000000;
+    result+=(a<<3) & 0b00100000;
+    result+=(b<<2) & 0b00010000;
+    result+=(a<<2) & 0b00001000;
+    result+=(b<<1) & 0b00000100;
+    result+=(a<<1) & 0b00000010;
+    result+=(b<<0) & 0b00000001;
+    return result;
+}
+
+unsigned char bitwise_xor(unsigned char a, unsigned char b){
+    return a^b;
+}
+
+unsigned char bit_reverse(unsigned char a){
+    a = (unsigned char) ((a & 0b11110000) >> 4 | (a & 0b00001111) << 4);
+    a = (unsigned char) ((a & 0b11001100) >> 2 | (a & 0b00110011) << 2);
+    a = (unsigned char) ((a & 0b10101010) >> 1 | (a & 0b01010101) << 1);
+    return a;
+}
+//
+//static unsigned char lookup[16] = {
+//        0x0, 0x8, 0x4, 0xc, 0x2, 0xa, 0x6, 0xe,
+//        0x1, 0x9, 0x5, 0xd, 0x3, 0xb, 0x7, 0xf, };
+//
+//unsigned char bit_reverse(unsigned char n) {
+//    // Reverse the top and bottom nibble then swap them.
+//    return (lookup[n&0b1111] << 4) | lookup[n>>4];
+//}
+
+void Dithering(unsigned char***Imagedata, unsigned char*** ImageOut, int matrixSize, int width=600, int height=400){
+    //matrixSize=2,8,32
+    int i,j,k,l;
+    unsigned char I2n[matrixSize][matrixSize];
+    for(i=0;i<matrixSize;i++){
+        for(j=0;j<matrixSize;j++){
+            I2n[i][j]=bit_reverse(bit_interleave((unsigned char) j,bitwise_xor((unsigned char)j, (unsigned char)i)));
+            //cout<< int(I2n[i][j])<<" ";
+        }
+        //cout<<endl;
+    }
+
+    for(i=0;i<matrixSize;i++){
+        for(j=0;j<matrixSize;j++){
+            cout<< int(I2n[i][j]+0.5/pow(matrixSize,2)*255)<<" ";
+            //cout<< int(I2n[i][j])<<" ";
+        }
+        cout<<endl;
+    }
+
+    unsigned char ***ThresholdMarix = AllocateMem<unsigned char>(1,width,height);
+    for(i=0;i<height;i+=matrixSize){
+        for(j=0;j<width;j+=matrixSize){
+            //(i,j) is the corner of current matrix
+            for(k=i;k<i+matrixSize && k<height;k++){
+                for(l=j;l<j+matrixSize && l<width;l++){
+                    //ThresholdMarix[k][l][0]=(unsigned char)((I2n[k-i][l-j]+0.5)/pow(matrixSize,2)*255);
+                    ThresholdMarix[k][l][0]=(unsigned char)(I2n[k-i][l-j]+0.5/pow(matrixSize,2)*255);
+                }
+            }
+        }
+    }
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            ImageOut[i][j][0]=(unsigned char)(Imagedata[i][j][0]<ThresholdMarix[i][j][0]?0:255);
+        }
+    }
+    FreeImage<unsigned char>(ThresholdMarix,1,width,height);
+
+}
+
+int main(int argc, char*argv[]) {
+    int BytesPerPixel = 3;
+    int width = 600;
+    int height = 400;
+    int i, j, k;
+    int matrixSize=stoi(argv[1]);
+
+    string PathInput = "HW2_images/Bridge.raw";
+    string PathOutput=argv[2];
+    //string PathOutput=argv[2];
+
+    unsigned char ***ImageData = AllocateMem<unsigned char>(1,width,height);//original image
+    unsigned char ***ImageOutput = AllocateMem<unsigned char>(1,width,height);
+    LoadImage(ImageData,PathInput,1,width,height);
+
+    Dithering(ImageData,ImageOutput,matrixSize);
+    OutputImage(ImageOutput,PathOutput,1,width,height);
+
+
+    FreeImage<unsigned char>(ImageData,1,width,height);
+    FreeImage<unsigned char>(ImageOutput,1,width,height);
+    cout<<"here"<<endl;
+    return 0;
+
+}
+
+
+#include <iostream>
+#include "fileIO.h"
+#include <cmath>
+
+void FS_Diffusion(unsigned char***Imagedata, unsigned char*** ImageOutput,int width=600, int height=400){
+    double***Error=AllocateMem<double>(1,width,height);
+    int T=128;
+    int i,j,k;
+
+    for(i=1;i<height-1;i++){
+        for(j=1;j<width-1;j++){
+
+            double F_new=Imagedata[i][j][0]+Error[i][j][0];
+            auto result=(unsigned char) (F_new>T?255:0);
+            double error=result-F_new;
+            Error[i][j+1][0]-=7/16.0*error;
+            Error[i+1][j-1][0]-=3/16.0*error;
+            Error[i+1][j][0]-=5/16.0*error;
+            Error[i+1][j+1][0]-=1/16.0*error;
+
+            ImageOutput[i][j][0]=result;
+
+        }
+    }
+    string PathOutput="Output/FS_Diffusion.raw";
+    OutputImage(ImageOutput,PathOutput,1,width,height);
+
+    FreeImage<double>(Error,1,width,height);
+}
+
+void JJN_Diffusion(unsigned char***Imagedata, unsigned char*** ImageOutput,int width=600, int height=400){
+    double***Error=AllocateMem<double>(1,width,height);
+    int T=128;
+    int i,j,k;
+
+    for(i=2;i<height-2;i++){
+        for(j=2;j<width-2;j++){
+
+            double F_new=Imagedata[i][j][0]+Error[i][j][0];
+            auto result=(unsigned char) (F_new>T?255:0);
+            double error=result-F_new;
+            Error[i][j+1][0]-=7/48.0*error;
+            Error[i][j+2][0]-=5/48.0*error;
+
+            Error[i+1][j-2][0]-=3/48.0*error;
+            Error[i+1][j-1][0]-=5/48.0*error;
+            Error[i+1][j][0]-=7/48.0*error;
+            Error[i+1][j+1][0]-=5/48.0*error;
+            Error[i+1][j+2][0]-=3/48.0*error;
+
+            Error[i+2][j-2][0]-=1/48.0*error;
+            Error[i+2][j-1][0]-=3/48.0*error;
+            Error[i+2][j][0]-=5/48.0*error;
+            Error[i+2][j+1][0]-=3/48.0*error;
+            Error[i+2][j+2][0]-=1/48.0*error;
+
+            ImageOutput[i][j][0]=result;
+
+        }
+    }
+    string PathOutput="Output/JJN_Diffusion.raw";
+    OutputImage(ImageOutput,PathOutput,1,width,height);
+
+    FreeImage<double>(Error,1,width,height);
+}
+
+void Stucki_Diffusion(unsigned char***Imagedata, unsigned char*** ImageOutput,int width=600, int height=400){
+    double***Error=AllocateMem<double>(1,width,height);
+    int T=128;
+    int i,j,k;
+
+    for(i=2;i<height-2;i++){
+        for(j=2;j<width-2;j++){
+
+            double F_new=Imagedata[i][j][0]+Error[i][j][0];
+            auto result=(unsigned char) (F_new>T?255:0);
+            double error=result-F_new;
+            Error[i][j+1][0]-=8/42.0*error;
+            Error[i][j+2][0]-=4/42.0*error;
+
+            Error[i+1][j-2][0]-=2/42.0*error;
+            Error[i+1][j-1][0]-=4/42.0*error;
+            Error[i+1][j][0]-=8/42.0*error;
+            Error[i+1][j+1][0]-=4/42.0*error;
+            Error[i+1][j+2][0]-=2/42.0*error;
+
+            Error[i+2][j-2][0]-=1/42.0*error;
+            Error[i+2][j-1][0]-=2/42.0*error;
+            Error[i+2][j][0]-=4/42.0*error;
+            Error[i+2][j+1][0]-=2/42.0*error;
+            Error[i+2][j+2][0]-=1/42.0*error;
+
+            ImageOutput[i][j][0]=result;
+
+        }
+    }
+    string PathOutput="Output/Stucki_Diffusion.raw";
+    OutputImage(ImageOutput,PathOutput,1,width,height);
+
+    FreeImage<double>(Error,1,width,height);
+}
+
+
+int main(int argc, char*argv[]) {
+    int BytesPerPixel = 3;
+    int width = 600;
+    int height = 400;
+    int i, j, k;
+
+    unsigned char***ImageData=AllocateMem<unsigned char>(1,width,height);//original image
+
+    unsigned char***ImageOutput=AllocateMem<unsigned char>(1,width,height);
+
+    string PathInput = "HW2_images/Bridge.raw";
+    LoadImage(ImageData,PathInput,1,width,height);
+
+    FS_Diffusion(ImageData,ImageOutput);
+    JJN_Diffusion(ImageData,ImageOutput);
+    Stucki_Diffusion(ImageData,ImageOutput);
+
+    FreeImage<unsigned char>(ImageData,1,width,height);
+    FreeImage<unsigned char>(ImageOutput,1,width,height);
+    cout<<"here"<<endl;
+    return 0;
+
+#include <iostream>
+#include "fileIO.h"
+#include <cmath>
+#include <string>
+
+void RGBCMY(unsigned char*** Imagedata,int BytesPerPixel=3,int width=500,int height=375){
+    int i,j,k;
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            for(k=0;k<BytesPerPixel;k++){
+                Imagedata[i][j][k]=(unsigned char)(255-Imagedata[i][j][k]);
+            }
+        }
+    }
+}
+
+string MBVQ(unsigned char C, unsigned char M, unsigned char Y){
+    unsigned char R=(unsigned char)(255-C);
+    unsigned char G=(unsigned char)(255-M);
+    unsigned char B=(unsigned char)(255-Y);
+    if(R+G>255){
+        if(G+B>255){
+            if((R+G+B)>510) return "CMYW";
+            else return "MYGC";
+        }
+        else return"RGMY";
+    }
+    else{
+        if(G + B <= 255){
+            if(R + B + G <= 255) return "KRGB";
+            else return "RGBM";
+        }
+        else return "CMGB";
+    }
+}
+
+string getNearestVertex(string mbvq,double C,double M,double Y){
+    double R=255-C;
+    double G=255-M;
+    double B=255-Y;
+    string vertex="fuck";
+    // No.1 for CMYW
+    if (mbvq == "CMYW") {
+        vertex = "white";
+        if (B < 0.5)
+            if (B <= R)
+                if (B <= G)
+                    vertex = "yellow";
+
+        if (G < 0.5)
+            if (G <= B)
+                if (G <= R)
+                    vertex = "magenta";
+
+        if (R < 0.5)
+            if (R <= B)
+                if (R <= G)
+                    vertex = "cyan";
+    }
+
+
+    // No.2 for MYGC
+    if (mbvq == "MYGC") {
+        vertex = "magenta";
+        if (G >= B)
+            if (R >= B)
+                vertex = R >= 0.5 ? "yellow" : "green";
+
+
+        if (G >= R)
+            if (B >= R)
+                vertex = B >= 0.5 ? "cyan" : "green";
+    }
+
+    // No.3 for RGMY
+    if (mbvq == "RGMY") {
+        if (B > 0.5) {
+            if (R > 0.5)
+                if (B >= G)
+                    vertex = "magenta";
+                else
+                    vertex = "yellow";
+
+            else {
+                if (G > B + R)
+                    vertex = "green";
+                else
+                    vertex = "magenta";
+            }
+        } else {
+            if (R >= 0.5)
+                if (G >= 0.5)
+                    vertex = "yellow";
+                else
+                    vertex = "red";
+
+            else if (R >= G)
+                vertex = "red";
+            else
+                vertex = "green";
+        }
+    }
+
+    // No.4 for KRGB
+    if (mbvq == "KRGB") {
+        vertex = "black";
+        if (B > 0.5)
+            if (B >= R)
+                if (B >= G)
+                    vertex = "blue";
+
+        if (G > 0.5)
+            if (G >= B)
+                if (G >= R)
+                    vertex = "green";
+
+        if (R > 0.5)
+            if (R >= B)
+                if (R >= G)
+                    vertex = "red";
+    }
+
+    // No.5 for RGBM
+    if (mbvq == "RGBM") {
+        vertex = "green";
+        if (R > G)
+            if (R >= B)
+                vertex = B < 0.5 ? "red" : "magenta";
+
+
+        if (B > G)
+            if (B >= R)
+                vertex = R < 0.5 ? "blue" : "magenta";
+    }
+
+
+    // No.6 for CMGB
+    if (mbvq == "CMGB") {
+        if (B > 0.5)
+            if (R > 0.5)
+                if (G >= R)
+                    vertex = "cyan";
+                else
+                    vertex = "magenta";
+
+            else if (G > 0.5)
+                vertex = "cyan";
+            else
+                vertex = "blue";
+
+
+        else if (R > 0.5)
+            if (R - G + B >= 0.5)
+                vertex = "magenta";
+            else
+                vertex = "green";
+
+        else if (G >= B)
+            vertex = "green";
+        else
+            vertex = "blue";
+    }
+    return vertex;
+}
+
+void parseVstring(const string &V_string, unsigned char*PixelOutput){
+    if(V_string=="blue"){
+        PixelOutput[0]=255;
+        PixelOutput[1]=255;
+        PixelOutput[2]=0;
+    }
+    else if(V_string=="green"){
+        PixelOutput[0]=255;
+        PixelOutput[1]=0;
+        PixelOutput[2]=255;
+    }
+    else if(V_string=="magenta"){
+        PixelOutput[0]=0;
+        PixelOutput[1]=255;
+        PixelOutput[2]=0;
+    }
+    else if(V_string=="cyan"){
+        PixelOutput[0]=255;
+        PixelOutput[1]=0;
+        PixelOutput[2]=0;
+    }
+    else if(V_string=="red"){
+        PixelOutput[0]=0;
+        PixelOutput[1]=255;
+        PixelOutput[2]=255;
+    }
+    else if(V_string=="black"){
+        PixelOutput[0]=255;
+        PixelOutput[1]=255;
+        PixelOutput[2]=255;
+    }
+    else if(V_string=="yellow"){
+        PixelOutput[0]=0;
+        PixelOutput[1]=0;
+        PixelOutput[2]=255;
+    }
+    else if(V_string=="white"){
+        PixelOutput[0]=0;
+        PixelOutput[1]=0;
+        PixelOutput[2]=0;
+    }
+    else exit(-1);
+
+}
+void MBVQED(unsigned char***Imagedata, unsigned char*** ImageOutput,int BytesPerPixel=3,int width=500, int height=375){
+    int i,j,k;
+    double***Error=AllocateMem<double>(BytesPerPixel,width,height);
+    for(i=1;i<height-1;i++){
+        for(j=1;j<width-1;j++){
+            string mbvq=MBVQ(Imagedata[i][j][0],Imagedata[i][j][1],Imagedata[i][j][2]);
+            double C_new=Imagedata[i][j][0]+Error[i][j][0];
+            double M_new=Imagedata[i][j][1]+Error[i][j][1];
+            double Y_new=Imagedata[i][j][2]+Error[i][j][2];
+            double newCMY[3]={C_new,M_new,Y_new};
+            string V_string=getNearestVertex(mbvq,C_new,M_new,Y_new);
+            parseVstring(V_string,ImageOutput[i][j]);
+            for(k=0;k<BytesPerPixel;k++){
+                Error[i][j + 1][k] -= 7 / 16.0 * (ImageOutput[i][j][k]-newCMY[k]);
+                Error[i + 1][j - 1][k] -= 3 / 16.0 * (ImageOutput[i][j][k]-newCMY[k]);
+                Error[i + 1][j][k] -= 5 / 16.0 * (ImageOutput[i][j][k]-newCMY[k]);
+                Error[i + 1][j + 1][k] -= 1 / 16.0 * (ImageOutput[i][j][k]-newCMY[k]);
+            }
+        }
+    }
+    FreeImage(Error,BytesPerPixel,width,height);
+}
+int main(int argc, char*argv[]) {
+    int BytesPerPixel = 3;
+    int width = 500;
+    int height = 375;
+    int i, j, k;
+
+    unsigned char***ImageData=AllocateMem<unsigned char>(BytesPerPixel,width,height);//original image
+
+    unsigned char***ImageOutput=AllocateMem<unsigned char>(BytesPerPixel,width,height);
+
+    string PathInput = "HW2_images/Bird.raw";
+    string PathOutput="Output/MBVQ.raw";
+    LoadImage(ImageData,PathInput,BytesPerPixel,width,height);
+    // cout<<(int)ImageData[20][350][0]<<" "<<(int)ImageData[20][350][1]<<" "<<(int)ImageData[20][350][2]<<l;
+    RGBCMY(ImageData);
+    MBVQED(ImageData,ImageOutput,BytesPerPixel);
+    RGBCMY(ImageOutput);
+    OutputImage(ImageOutput,PathOutput,BytesPerPixel,width,height);
+
+
+    FreeImage<unsigned char>(ImageData,BytesPerPixel,width,height);
+    FreeImage<unsigned char>(ImageOutput,BytesPerPixel,width,height);
+    cout<<"here"<<endl;
+    return 0;
+}
+
+
+#include <iostream>
+#include "fileIO.h"
+#include <cmath>
+
+void RGBCMY(unsigned char*** Imagedata,int BytesPerPixel=3,int width=500,int height=375){
+    int i,j,k;
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            for(k=0;k<BytesPerPixel;k++){
+                Imagedata[i][j][k]=(unsigned char)(255-Imagedata[i][j][k]);
+            }
+        }
+    }
+}
+
+void FS_Diffusion(unsigned char***Imagedata, unsigned char*** ImageOutput,int BytesPerPixel=3,int width=500, int height=375){
+    double***Error=AllocateMem<double>(3,width,height);
+    int T=128;
+    int i,j,k;
+    for(k=0;k<BytesPerPixel;k++) {
+        for (i = 1; i < height - 1; i++) {
+            for (j = 1; j < width - 1; j++) {
+                double F_new = Imagedata[i][j][k] + Error[i][j][k];
+                auto result = (unsigned char) (F_new > T ? 255 : 0);
+                double error = result - F_new;
+                Error[i][j + 1][k] -= 7 / 16.0 * error;
+                Error[i + 1][j - 1][k] -= 3 / 16.0 * error;
+                Error[i + 1][j][k] -= 5 / 16.0 * error;
+                Error[i + 1][j + 1][k] -= 1 / 16.0 * error;
+                ImageOutput[i][j][k] = result;
+            }
+        }
+    }
+
+    FreeImage<double>(Error,3,width,height);
+}
+
+
+int main(int argc, char*argv[]) {
+    int BytesPerPixel = 3;
+    int width = 500;
+    int height = 375;
+    int i, j, k;
+
+    unsigned char***ImageData=AllocateMem<unsigned char>(BytesPerPixel,width,height);//original image
+    unsigned char***ImageDataCMY=AllocateMem<unsigned char>(BytesPerPixel,width,height);
+    unsigned char***ImageOutput=AllocateMem<unsigned char>(BytesPerPixel,width,height);
+
+    string PathInput = "HW2_images/Bird.raw";
+    string PathOutput="Output/SeparableED.raw";
+    LoadImage(ImageData,PathInput,BytesPerPixel,width,height);
+   // cout<<(int)ImageData[20][350][0]<<" "<<(int)ImageData[20][350][1]<<" "<<(int)ImageData[20][350][2]<<endl;
+    RGBCMY(ImageData);
+    FS_Diffusion(ImageData,ImageOutput,BytesPerPixel);
+    RGBCMY(ImageOutput);
+    OutputImage(ImageOutput,PathOutput,BytesPerPixel,width,height);
+
+
+    FreeImage<unsigned char>(ImageData,BytesPerPixel,width,height);
+    FreeImage<unsigned char>(ImageDataCMY,BytesPerPixel,width,height);
+    FreeImage<unsigned char>(ImageOutput,BytesPerPixel,width,height);
+    cout<<"here"<<endl;
+    return 0;
+
+
+
+#include <iostream>
+#include "fileIO.h"
+#include <cmath>
+#include <vector>
+#include <algorithm>
+void RGB2Y(unsigned char***RGB,unsigned char***Y, int width=481, int height=321){
+    //RGB[heigth][width][3], Y[heigth][width][1]
+    int i,j,k;
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            Y[i][j][0]=(unsigned char)floor(RGB[i][j][0]*0.2989+RGB[i][j][1]*0.5870+RGB[i][j][2]*0.1140);
+        }
+    }
+}
+
+void Gradient(unsigned char***ImagedataY, double***GF,double ***Gx,double***Gy,
+        int width=481, int height=321){
+    int i,j,k;
+    for(i=1; i<height-1; i++) {
+        for(j=1; j<width-1; j++) {
+            Gx[i][j][0]=(ImagedataY[i-1][j-1][0]-ImagedataY[i-1][j+1][0]+ImagedataY[i+1][j-1][0]-ImagedataY[i+1][j+1][0]
+                    +2*ImagedataY[i][j-1][0]-2*ImagedataY[i][j+1][0])/4.0;
+            Gy[i][j][0]=(-ImagedataY[i-1][j-1][0]-ImagedataY[i-1][j+1][0]+ImagedataY[i+1][j-1][0]-ImagedataY[i+1][j+1][0]
+                                              -2*ImagedataY[i-1][j][0]+2*ImagedataY[i+1][j][0])/4.0;
+            GF[i][j][0]=sqrt(pow(Gx[i][j][0],2)+pow(Gy[i][j][0],2));
+        }
+    }
+}
+
+void Normalize(double***Imagedata,unsigned char*** ImageOutput, int width=481, int height=321){
+    //EFFECT:normalize gradient to 0-255
+    int i,j,k;
+    double max=0;
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            max=Imagedata[i][j][0]>max?Imagedata[i][j][0]:max;
+        }
+    }
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            ImageOutput[i][j][0]=(unsigned char)floor(Imagedata[i][j][0]/max*255);
+        }
+    }
+}
+
+void Threshold(double ***Imagedata, unsigned char*** ImageOutput, double thresPercentage, int width=481,int height=321){
+    //EFFECT set the threshold of boundary to be top [thres]%, then adjust pixels to 0(edge) or 255(background)
+    //thresPercentage: top [thres]% will be edge
+    int i,j,k;
+    std::vector<double> pixels;
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            pixels.push_back(Imagedata[i][j][0]);
+        }
+    }
+    sort(pixels.begin(),pixels.end());
+    double threshold=pixels[floor((1-thresPercentage/100)*height*width)];
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            ImageOutput[i][j][0]=(unsigned char)(Imagedata[i][j][0]<threshold?255:0);
+        }
+    }
+}
+
+
+int main(int argc, char *argv[]) {
+    int BytesPerPixel = 3;
+    int width = 481;
+    int height = 321;
+    int i,j,k;
+
+    string PathInput=argv[1];
+    //string PathOutput=argv[2];
+
+    unsigned char***ImageData=AllocateMem<unsigned char>();//original image
+    unsigned char***ImageDataY=AllocateMem<unsigned char>(1);//origianl image to Y channel
+    unsigned char***ImageOutput=AllocateMem<unsigned char>(1);//output of gradient map
+    double***Gx=AllocateMem<double>(1);
+    double***Gy=AllocateMem<double>(1);
+    double***GF=AllocateMem<double>(1);
+
+    LoadImage(ImageData,PathInput);
+    RGB2Y(ImageData,ImageDataY);
+
+    Gradient(ImageDataY,GF,Gx,Gy);
+
+    Normalize(Gx,ImageOutput);
+    OutputImage(ImageOutput,"Output/Pig x Gradient.raw",1);
+
+    Normalize(Gy,ImageOutput);
+    OutputImage(ImageOutput,"Output/Pig y Gradient.raw",1);
+
+    Normalize(GF,ImageOutput);
+    OutputImage(ImageOutput,"Output/Pig gradient.raw",1);
+
+    Threshold(GF,ImageOutput,5);
+    OutputImage(ImageOutput,"Output/PigEdge5.raw",1);
+
+
+    FreeImage<unsigned char>(ImageData);
+    FreeImage<unsigned char>(ImageDataY);
+    FreeImage<unsigned char>(ImageOutput);
+    FreeImage<double>(Gx);
+    FreeImage<double>(Gy);
+    FreeImage<double>(GF);
+
+    return 0;
+}
+
+#include <iostream>
+#include "fileIO.h"
+#include <cmath>
+#include <random>
+void FixedThresholding(unsigned char***Imagedata, unsigned char*** ImageOut, int width=600, int height=400){
+    int i,j,k;
+    int T=128;
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            ImageOut[i][j][0]=(unsigned char)(Imagedata[i][j][0]<T?0:255);
+        }
+    }
+    string PathOutput="Output/BridgeFixed.raw";
+    OutputImage(ImageOut,PathOutput,1,width,height);
+}
+
+
+void RandomThresholding(unsigned char***Imagedata, unsigned char*** ImageOut, int width=600, int height=400){
+    int i,j,k;
+    int T;
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            T=rand()%256;
+            ImageOut[i][j][0]=(unsigned char)(Imagedata[i][j][0]<T?0:255);
+        }
+    }
+    string PathOutput="Output/BridgeRandom.raw";
+    OutputImage(ImageOut,PathOutput,1,width,height);
+}
+
+int main() {
+    int BytesPerPixel = 3;
+    int width = 600;
+    int height = 400;
+    int i, j, k;
+
+    string PathInput = "HW2_images/Bridge.raw";
+    //string PathOutput=argv[2];
+
+    unsigned char ***ImageData = AllocateMem<unsigned char>(1,width,height);//original image
+    unsigned char ***ImageOutput = AllocateMem<unsigned char>(1,width,height);
+    LoadImage(ImageData,PathInput,1,width,height);
+
+
+    FixedThresholding(ImageData,ImageOutput);
+    RandomThresholding(ImageData,ImageOutput);
+
+    FreeImage<unsigned char>(ImageData,1,width,height);
+    FreeImage<unsigned char>(ImageOutput,1,width,height);
+    cout<<"here"<<endl;
+    return 0;
+
+
+
+
+clear all;
+clc;
+close all;
+
+mbvq='CMGB';
+R=233.0;
+G=233.0;
+B=233.0;
+
+vertex=getNearestVertex(mbvq, R, G, B);
+
+
+%image=readraw(481,321,'TigerEdge5.raw');
+%image=readraw(481,321,'PigEdge5.raw');
+%image=readraw(481,321,'TigerCanny-250-300.raw');
+%image=readraw(481,321,'PigCanny-250-300.raw');
+%image=load('TigerSE.mat');
+%image=load('PigSE.mat');
+image=readraw(481,321,'TigerCanny-100-200.raw');
+%image=readraw(481,321,'PigCanny-300-400.raw');
+disp(size(image))
+Boundarymap=zeros(321,481);
+for i = 1 : 321
+   for j = 1 : 481
+%        if image(i,j)==0
+%            Boundarymap(i,j)=1;
+%        else
+%            Boundarymap(i,j)=0;
+%        end
+       if image(i,j)==0
+           Boundarymap(i,j)=0;
+       else
+           Boundarymap(i,j)=1;
+       end
+   end
+end
+%Boundarymap=image.myimage;
+g=load('Tiger_GT.mat')
+%g=load('Pig_GT.mat')
+g=g.groundTruth;
+%disp(g{1}.Boundaries)
+P=0
+R=0
+for i=1:5
+    groundTruth{1}=g{i};
+    %disp(size(Boundarymap))
+    %disp(size(groundTruth{1}.Boundaries))
+    save('myGT.mat','groundTruth');
+    [~, cntR, sumR, cntP, sumP, ~] =edgesEvalImg( Boundarymap,'myGT.mat', {'thrs', 1} )
+     disp([cntP/sumP,i]);
+     disp([cntR/sumR,i]);
+    P=P+cntP/sumP
+    R=R+cntR/sumR
+end
+P=P/5
+R=R/5
+F=2*P*R/(P+R)
+
+
+function[image]=readraw(width,height,file)
+    f=fopen(file,'r');
+    data=fread(f);
+    image=reshape(data,height,width,1);%1 is num of channels
+    fclose(f);
+end
+
+
+function[image]=readraw2(width,height,file)
+    f=fopen(file,'r');
+    data=fread(f);
+    image=reshape(data,height,width,1);%1 is num of channels
+    image=image/255;
+    fclose(f);
+end
+
+function[image]=readraw2(width,height,file)
+    f=fopen(file,'r');
+    data=fread(f);
+    image=reshape(data,height,width,1);%1 is num of channels
+    image=image/255;
+    fclose(f);
+end
+
+%image=readraw(481,321,'TigerEdge5.raw');
+%image=readraw(481,321,'PigEdge5.raw');
+%image=readraw(481,321,'TigerCanny-250-300.raw');
+%image=readraw(481,321,'PigCanny-250-300.raw');
+%image=load('TigerSE.mat');
+%image=load('PigSE.mat');
+%image=readraw2(481,321,'Tiger gradient.raw');
+%image=readraw2(481,321,'Pig gradient.raw');
+
+disp(size(image))
+
+% Boundarymap=image;
+% disp(Boundarymap)
+
+Boundarymap=zeros(321,481);
+for i = 1 : 321
+   for j = 1 : 481
+%        if image(i,j)==0
+%            Boundarymap(i,j)=1;
+%        else
+%            Boundarymap(i,j)=0;
+%        end
+       if image(i,j)==0
+           Boundarymap(i,j)=0;
+       else
+           Boundarymap(i,j)=1;
+       end
+   end
+end
+%Boundarymap=image.myimage;
+g=load('Tiger_GT.mat')
+%g=load('Pig_GT.mat')
+g=g.groundTruth;
+
+%disp(g{1}.Boundaries)
+P=zeros(99)
+R=zeros(99)
+for i=1:5
+    groundTruth{1}=g{i};
+    %disp(size(Boundarymap))
+    %disp(size(groundTruth{1}.Boundaries))
+    save('myGT.mat','groundTruth');
+    [~, cntR, sumR, cntP, sumP, ~] =edgesEvalImg( Boundarymap,'myGT.mat', {'thrs', 99} )
+%      disp([cntP./sumP,i]);
+%      disp([cntR./sumR,i]);
+    P=P+cntP./sumP
+    R=R+cntR./sumR
+end
+P=P/5
+R=R/5
+F=2.*P.*R./(P+R)
+
+x=linspace(0.01,0.99,99)
+
+
+plot(x,P);hold on;
+plot(x,R);hold on;
+plot(x,F);hold on;
+legend('Precision','Recall','F')
+
+
+
+% Demo for Structured Edge Detector (please see readme.txt first).
+
+%% set opts for training (see edgesTrain.m)
+opts=edgesTrain();                % default options (good settings)
+opts.modelDir='models/';          % model will be in models/forest
+opts.modelFnm='modelBsds';        % model name
+opts.nPos=5e5; opts.nNeg=5e5;     % decrease to speedup training
+opts.useParfor=0;                 % parallelize if sufficient memory
+
+%% train edge detector (~20m/8Gb per tree, proportional to nPos/nNeg)
+tic, model=edgesTrain(opts); toc; % will load model if already trained
+
+%% set detection parameters (can set after training)
+model.opts.multiscale=1;          % for top accuracy set multiscale=1
+model.opts.sharpen=2;             % for top speed set sharpen=0
+model.opts.nTreesEval=8;          % for top speed set nTreesEval=1
+model.opts.nThreads=4;            % max number threads for evaluation
+model.opts.nms=0;                 % set to true to enable nms
+
+%% evaluate edge detector on BSDS500 (see edgesEval.m)
+if(0), edgesEval( model, 'show',1, 'name','' ); end
+
+%% detect edge and visualize results
+I = imread('C:\Users\Administrator\Desktop\EE569\assignments\HW2\Matlab part\HW2_images\Tiger.jpg');
+tic, E=edgesDetect(I,model); toc
+figure(1); im(I); figure(2); im(1-E);
+myimage=(1-E);
+%save('PigSE.mat','myimage');
+save('TigerSE.mat','myimage');
+

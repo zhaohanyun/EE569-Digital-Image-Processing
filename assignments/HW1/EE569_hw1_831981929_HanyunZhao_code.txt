@@ -1,0 +1,1900 @@
+cmake_minimum_required(VERSION 3.12)
+project(EE569_hw1_8831981929_HanyunZhao)
+
+set(CMAKE_CXX_STANDARD 14)
+
+set(OpenCV_DIR "D:\\OpenCV\\opencv\\mingw-build")
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake/")
+
+find_package(OpenCV REQUIRED)
+include_directories(${OpenCV_INCLUDE_DIRS})
+
+add_executable(EE569_hw1_8831981929_HanyunZhao BilinearDemosaicing.cpp HistogramMani1.cpp HistogramMani2.cpp CLAHE.cpp CLAHEcv.cpp CLAHE2.cpp ImageDeno.cpp ImgDenoMean.cpp ImgDenoGauss.cpp BilateralFilter.cpp NLMcv.cpp  FrostedGlassFilter.cpp)
+#add_executable(EE569_hw1_8831981929_HanyunZhao CLAHEcv.cpp)
+#add_executable(EE569_hw1_8831981929_HanyunZhao NLMcv.cpp)
+#add_executable(EE569_hw1_8831981929_HanyunZhao MixNoiseColor.cpp)
+
+# add libs you need
+set(OpenCV_LIBS opencv_core opencv_imgproc opencv_highgui opencv_imgcodecs opencv_photo)
+
+# linking
+target_link_libraries(EE569_hw1_8831981929_HanyunZhao ${OpenCV_LIBS})
+
+
+
+//
+// Created by Administrator on 2022/1/29.
+//
+#include <stdio.h>
+#include <iostream>
+#include <fstream>
+#include <stdlib.h>
+#include <fstream>
+#include <cmath>
+#include <queue>
+using namespace std;
+
+void applyFilter(unsigned char*** (&Imagedata), unsigned char*** (&ImagedataOut),int size) {
+    //size 3*3 or 5*5, use both to compare results
+    double sigmaC=2;
+    double sigmaS=50;
+    //8,0.1     https://people.csail.mit.edu/sparis/bf_course/course_notes.pdf
+    int i,j,k,l;
+    double w;
+    double numerator,denominator;
+    for(i=(size-1)/2;i<512-(size-1)/2;i++){
+        for(j=(size-1)/2;j<768-(size-1)/2;j++){
+            w=0;numerator=0;denominator=0;
+            for(k=i-(size-1)/2;k<=i+(size-1)/2;k++){
+                for(l=j-(size-1)/2;l<=j+(size-1)/2;l++){
+                    //if (k==i && l==j) continue;
+                    w=exp(-(pow(i-k,2)+pow(j-l,2))/(2*pow(sigmaC,2)) - pow(Imagedata[i][j][0]-Imagedata[k][l][0],2)/(2*pow(sigmaS,2)));
+                    denominator+=w;
+                    numerator+=Imagedata[k][l][0]*w;
+                }
+            }
+            ImagedataOut[i][j][0]=(unsigned char)floor(numerator/denominator);
+
+        }
+    }
+
+
+    unsigned char ImageOridata[512][768][1];//the size of House.raw
+    FILE *file;
+    // Read image (filename specified by first argument) into image data matrix
+    if (!(file = fopen("images/Flower_gray.raw", "rb"))) {
+        cout << "Cannot open file: " << "images/Flower_gray.raw" << endl;
+        exit(1);
+    }
+    fread(ImageOridata, sizeof(unsigned char),512*768*1, file);
+    fclose(file);
+
+    double MSE=0;
+    for(i=0;i<512;i++){
+        for(j=0;j<768;j++){
+            MSE+=pow((ImagedataOut[i][j][0]-ImageOridata[i][j][0]),2)/(768*512);
+        }
+    }
+    double PSNR=10*log10(255*255/MSE);
+    cout<<PSNR<<endl;
+}
+
+int main(int argc, char *argv[]) {
+    // Define file pointer and variables
+    ifstream file;
+    int BytesPerPixel = 1;
+    int width = 768;
+    int height = 512;
+
+    if(argc<4){
+        return -1;
+    }
+
+    // Allocate image data array
+    file.open(argv[1],ios::in | ios::binary);
+    unsigned char ***Imagedata;
+    unsigned char ***ImagedataOut;
+    Imagedata=new unsigned char **[height];
+    int i,j,k;
+    int cnt=0;
+    for(i=0; i<height; i++)
+    {
+        Imagedata[i]=new unsigned char *[width];
+        for(j=0; j<width; j++) {
+            Imagedata[i][j] = new unsigned char[BytesPerPixel];
+            for (k = 0; k < BytesPerPixel; k++) {
+                file>>noskipws>>Imagedata[i][j][k];
+            }
+        }
+    }
+    file.close();
+
+    ImagedataOut=new unsigned char **[height];
+    for(i=0; i<height; i++)
+    {
+        ImagedataOut[i]=new unsigned char *[width];
+        for(j=0; j<width; j++) {
+            ImagedataOut[i][j] = new unsigned char[BytesPerPixel];
+            for (k = 0; k < BytesPerPixel; k++) {
+                ImagedataOut[i][j][k]=Imagedata[i][j][k];
+            }
+        }
+    }
+    //////////////////////////////////
+    //TODO:
+    int size=atoi(argv[3]);
+    applyFilter(Imagedata,ImagedataOut,size);
+
+    //////////////////////////////////////
+
+    ofstream fileout;
+    fileout.open(argv[2],ios::binary);
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                fileout<<noskipws<<ImagedataOut[i][j][k];
+            }
+        }
+    }
+    fileout.close();
+
+    /////////////////////////////////free the memory
+    for(i=0; i<height; i++)
+    {
+        for(j=0; j<width; j++)
+        {
+            delete [] Imagedata[i][j];
+            delete [] ImagedataOut[i][j];
+        }
+    }
+    for(i=0; i<height; i++)
+    {
+        delete [] Imagedata[i];
+        delete [] ImagedataOut[i];
+    }
+    delete [] Imagedata;
+    delete [] ImagedataOut;
+    ////////////////////////////////////////
+
+    return 0;
+}
+
+
+
+// EE569 Homework Assignment #1
+///Created on: Jan 11, 2022
+// Name: Hanyun Zhao
+// ID: 8831981929
+// email: hanyunzh@usc.edu
+#include <stdio.h>
+#include <iostream>
+#include <stdlib.h>
+
+using namespace std;
+int main(int argc, char *argv[])
+
+{
+    // Define file pointer and variables
+    FILE *file;
+    int BytesPerPixel;
+    //int Size = 256;
+    int width=768;
+    int height=512;
+
+    // Check for proper syntax
+    if (argc < 3){
+        cout << "Syntax Error - Incorrect Parameter Usage:" << endl;
+        cout << "program_name input_image.raw output_image.raw [BytesPerPixel = 1] [Size = 256]" << endl;
+        return 0;
+    }
+
+    // Check if image is grayscale or color
+    if (argc < 4){
+        BytesPerPixel = 1; // default is grey image
+    }
+    else {
+        BytesPerPixel = atoi(argv[3]);
+        // Check if size is specified
+//        if (argc >= 5){
+//            Size = atoi(argv[4]);
+//        }
+    }
+
+    // Allocate image data array
+    unsigned char Imagedata[height][width][BytesPerPixel];//the size of House.raw
+
+    // Read image (filename specified by first argument) into image data matrix
+    if (!(file=fopen(argv[1],"rb"))) {
+        cout << "Cannot open file: " << argv[1] <<endl;
+        exit(1);
+    }
+    fread(Imagedata, sizeof(unsigned char), width*height*BytesPerPixel, file);
+    fclose(file);
+
+    ///////////////////////// INSERT YOUR PROCESSING CODE HERE /////////////////////////
+    //TODO:my code
+    FILE *fileout;
+    //unsigned char ImageOri[width][height][3];//file2
+    unsigned char ImageOutput[height][width][3];//fileout
+
+    /*
+    ////////////initialize House_Ori.raw container
+    unsigned char ***ImageOri;
+    ImageOri=new unsigned char **[768];
+    int i,j,k;
+    for(i=0; i<768; i++)
+    {
+        ImageOri[i]=new unsigned char *[512];
+        for(j=0; j<512; j++)
+            ImageOri[i][j]=new unsigned char[3];
+    }
+    ////////////////
+    */
+    int i,j;
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            if(i==0 || i==height-1 || j==0 || j==width-1){//edge or corner
+                if((j - i) % 2 == 0) {//green pixel
+                    ImageOutput[i][j][1] = Imagedata[i][j][0];
+                    ImageOutput[i][j][0] = 0;
+                    ImageOutput[i][j][2] = 0;
+                }
+                else if(i%2==0){//red pixel
+                    ImageOutput[i][j][0] = Imagedata[i][j][0];
+                    ImageOutput[i][j][1] = 0;
+                    ImageOutput[i][j][2] = 0;
+                }
+                else{//blue pixel
+                    ImageOutput[i][j][2] = Imagedata[i][j][0];
+                    ImageOutput[i][j][0] = 0;
+                    ImageOutput[i][j][1] = 0;
+                }
+            }
+            else {
+                if((j - i) % 2 == 0) {//green pixel
+                    ImageOutput[i][j][1] = Imagedata[i][j][0];
+                    if(i%2==0) {
+                        ImageOutput[i][j][2] = ((Imagedata[i-1][j][0] + Imagedata[i+1][j][0]) / 2);
+                        ImageOutput[i][j][0] = ((Imagedata[i][j-1][0] + Imagedata[i][j+1][0]) / 2);
+                    }
+                    else{
+                        ImageOutput[i][j][2] = ((Imagedata[i][j-1][0] + Imagedata[i][j+1][0]) / 2);
+                        ImageOutput[i][j][0] = ((Imagedata[i-1][j][0] + Imagedata[i+1][j][0]) / 2);
+                    }
+                }
+                else if(i%2==0){//red pixel
+                    ImageOutput[i][j][0] = Imagedata[i][j][0];
+                    ImageOutput[i][j][1] = ((Imagedata[i-1][j][0]+Imagedata[i][j-1][0]+Imagedata[i][j+1][0]+Imagedata[i+1][j][0])/4);
+                    ImageOutput[i][j][2] = ((Imagedata[i-1][j-1][0]+Imagedata[i+1][j-1][0]+Imagedata[i-1][j+1][0]+Imagedata[i+1][j+1][0])/4);
+                }
+                else{//blue pixel
+                    ImageOutput[i][j][2] = Imagedata[i][j][0];
+                    ImageOutput[i][j][1] = ((Imagedata[i-1][j][0]+Imagedata[i][j-1][0]+Imagedata[i][j+1][0]+Imagedata[i+1][j][0])/4);
+                    ImageOutput[i][j][0] = ((Imagedata[i-1][j-1][0]+Imagedata[i+1][j-1][0]+Imagedata[i-1][j+1][0]+Imagedata[i+1][j+1][0])/4);
+                }
+            }
+        }
+    }
+//    cout<<(int)Imagedata[1][2][0]<<endl;
+//    //cout<<(int)ImageOutput[1][2][0]<<" "<<(int)ImageOutput[1][2][1]<<" "<<(int)ImageOutput[1][2][2]<<endl;
+//    //cout<<(int)ImageOri[1][1][0]<<" "<<(int)ImageOri[1][1][1]<<" "<<(int)ImageOri[1][1][2]<<endl;
+//    for(i=0;i<8;i++){
+//        for(j=0;j<8;j++){
+//            cout<<(int)Imagedata[i][j][0]<<" ";
+//        }
+//        cout<<endl;
+//    }
+    ////////////////////////////////////////////////////////////////////////////////////
+    // Write image data (filename specified by second argument) from image data matrix
+
+    if (!(fileout=fopen(argv[2],"wb"))) {
+        cout << "Cannot open file: " << argv[2] << endl;
+        exit(1);
+    }
+    fwrite(ImageOutput, sizeof(unsigned char), width*height*3, fileout);
+    fclose(fileout);
+
+    /*
+    //////////////////deleted House_Ori.raw container
+    for(i=0; i<768; i++)
+    {
+        for(j=0; j<512; j++)
+        {
+            delete [] ImageOri[i][j];
+        }
+    }
+    for(i=0; i<768; i++)
+    {
+        delete [] ImageOri[i];
+    }
+    delete [] ImageOri;
+    ////////////////////////
+    */
+
+    return 0;
+}
+
+
+
+//
+// Created by Administrator on 2022/1/23.
+//
+#include <stdio.h>
+#include <iostream>
+#include <stdlib.h>
+#include <fstream>
+#include <cmath>
+
+//This file has new version of file input (dynamic memory, file stream. fread will fail, maybe because
+//the memory is not continue any more.
+using namespace std;
+
+void RGB2YUV(unsigned char (*&RGB)){
+    unsigned char YUV[3];
+    YUV[0]=(unsigned char)floor(0.257*RGB[0]+0.504*RGB[1]+0.098*RGB[2]+16);
+    YUV[1]=(unsigned char)floor(-0.148*RGB[0]-0.291*RGB[1]+0.439*RGB[2]+128);
+    YUV[2]=(unsigned char)floor(0.439*RGB[0]-0.368*RGB[1]-0.071*RGB[2]+128);
+    for(int i=0;i<3;i++) RGB[i]=YUV[i];
+    //now the RGB[3] actually stores the YUV value
+}
+
+void YUV2RGB(unsigned char(*&YUV)){
+    unsigned char RGB[3];
+    int a=(int)floor(1.164*(YUV[0]-16)+1.596*(YUV[2]-128));
+    a= (a<0 || a>255)?255*(a>0):a;
+    RGB[0]=(unsigned char)a;
+    int b=(int)floor(1.164*(YUV[0]-16)-0.813*(YUV[2]-128)-0.391*(YUV[1]-128));
+    b= (b<0 || b>255)?255*(b>0):b;
+    RGB[1]=(unsigned char)b;
+    int c=(int)floor(1.164*(YUV[0]-16)+2.018*(YUV[1]-128));
+    c= (c<0 || c>255)?255*(c>0):c;
+    RGB[2]=(unsigned char)c;
+    for(int i=0;i<3;i++) YUV[i]=RGB[i];
+    //now stores the RGB values
+}
+
+int main(int argc, char *argv[]){
+    //FILE *file;
+//    FILE *file1;
+    int BytesPerPixel = 3;
+    int width = 600;
+    int height = 400;
+//    unsigned char Imagedata1[height][width][BytesPerPixel];//the size of House.raw
+//
+//    // Read image (filename specified by first argument) into image data matrix
+//    if (!(file1 = fopen(argv[1], "rb"))) {
+//        cout << "Cannot open file: " << argv[1] << endl;
+//        exit(1);
+//    }
+//    fread(Imagedata1, sizeof(unsigned char), width * height * BytesPerPixel, file1);
+//    fclose(file1);
+
+
+    ifstream file;
+    // Allocate image data array
+    file.open(argv[1],ios::in | ios::binary );
+    unsigned char ***Imagedata;
+    Imagedata=new unsigned char **[height];
+    int i,j,k;
+    int cnt=0;
+    for(i=0; i<height; i++)
+    {
+        Imagedata[i]=new unsigned char *[width];
+        for(j=0; j<width; j++) {
+            Imagedata[i][j] = new unsigned char[BytesPerPixel];
+            for (k = 0; k < BytesPerPixel; k++) {
+                file>>noskipws>>Imagedata[i][j][k];
+            }
+        }
+    }
+    file.close();
+
+//    for(i=0; i<height; i++)
+//    {
+//        for(j=0; j<width; j++) {
+//            for (k = 0; k < BytesPerPixel; k++) {
+//                if(Imagedata[i][j][k]!=Imagedata1[i][j][k]){
+//                    cout<<i<<" "<<j<<" "<<k<<endl;
+//                    cout<<int(Imagedata1[i][j][k])<<endl;
+//                    cout<<int(Imagedata[i][j][k])<<endl;
+//                    cout<<int(Imagedata1[177][10][0])<<endl;
+//                    cout<<int(Imagedata[177][10][0])<<endl;
+//                    cout<<int(Imagedata1[177][10][1])<<endl;
+//                    return -1;
+//                }
+//            }
+//        }
+//    }
+
+////////////////////////////////////
+    //TODO: three steps
+    int data[256];
+    for (i=0;i<256;i++) data[i]=0;
+    //1.RGB 2 YUV
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            RGB2YUV(Imagedata[i][j]);
+            data[Imagedata[i][j][0]]++;
+        }
+    }
+
+
+//    for(i=0;i<255;i++) cout<<data[i]<<endl;
+    //2. HE1
+    double cumdata[256]={0};
+    cumdata[0]=data[0]/(width*height*1.0);
+    for(i=1;i<256;i++){
+        cumdata[i]=(data[i])/(width*height*1.0)+cumdata[i-1];
+    }
+
+    int newCumData[256]={0};
+    for(i=0;i<256;i++){
+        newCumData[i]=(int)floor(cumdata[i]*255);
+    }
+
+    ofstream fileout;
+    fileout.open(argv[2],ios::binary);
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            Imagedata[i][j][0]=(unsigned char)newCumData[Imagedata[i][j][0]];
+            YUV2RGB(Imagedata[i][j]);
+            //3.YUV 2 RGB
+            for (k = 0; k < BytesPerPixel; k++) {
+                fileout<<noskipws<<Imagedata[i][j][k];
+            }
+        }
+    }
+    fileout.close();
+
+//    ofstream fileout;
+//    fileout.open(argv[2],ios::binary);
+//    for(i=0; i<height; i++) {
+//        for(j=0; j<width; j++) {
+//            for (k = 0; k < BytesPerPixel; k++) {
+//                fileout<<Imagedata[i][j][k];
+//            }
+//        }
+//    }
+//    fileout.close();
+ ////////////////////////////////////
+
+
+    /////////////////////////////////free the memory
+    for(i=0; i<height; i++)
+    {
+        for(j=0; j<width; j++)
+        {
+            delete [] Imagedata[i][j];
+        }
+    }
+    for(i=0; i<height; i++)
+    {
+        delete [] Imagedata[i];
+    }
+    delete [] Imagedata;
+    ////////////////////////////////////////
+    return 0;
+}
+
+
+
+//
+// Created by Administrator on 2022/1/25.
+//
+
+#include <stdio.h>
+#include <iostream>
+#include <stdlib.h>
+#include <fstream>
+#include <cmath>
+#include <queue>
+//This file has new version of file input (dynamic memory, file stream. fread will fail, maybe because
+//the memory is not continue any more.
+using namespace std;
+
+typedef struct Pixel{
+    pair<int,int> position;
+    int intensity;
+}pixel;
+//bool pixelCmp(pixel a, pixel b){
+//    return a.intensity>b.intensity;
+//}
+struct pixelCmp{
+    bool operator()(pixel a,pixel b) {
+        return a.intensity > b.intensity;
+    }
+};
+
+void RGB2YUV(unsigned char (*&RGB)){
+    unsigned char YUV[3];
+    YUV[0]=(unsigned char)floor(0.257*RGB[0]+0.504*RGB[1]+0.098*RGB[2]+16);
+    YUV[1]=(unsigned char)floor(-0.148*RGB[0]-0.291*RGB[1]+0.439*RGB[2]+128);
+    YUV[2]=(unsigned char)floor(0.439*RGB[0]-0.368*RGB[1]-0.071*RGB[2]+128);
+    for(int i=0;i<3;i++) RGB[i]=YUV[i];
+    //now the RGB[3] actually stores the YUV value
+}
+
+void YUV2RGB(unsigned char(*&YUV)){
+    unsigned char RGB[3];
+    int a=(int)floor(1.164*(YUV[0]-16)+1.596*(YUV[2]-128));
+    a= (a<0 || a>255)?255*(a>0):a;
+    RGB[0]=(unsigned char)a;
+    int b=(int)floor(1.164*(YUV[0]-16)-0.813*(YUV[2]-128)-0.391*(YUV[1]-128));
+    b= (b<0 || b>255)?255*(b>0):b;
+    RGB[1]=(unsigned char)b;
+    int c=(int)floor(1.164*(YUV[0]-16)+2.018*(YUV[1]-128));
+    c= (c<0 || c>255)?255*(c>0):c;
+    RGB[2]=(unsigned char)c;
+    for(int i=0;i<3;i++) YUV[i]=RGB[i];
+    //now stores the RGB values
+}
+
+int main(int argc, char *argv[]){
+    //FILE *file;
+//    FILE *file1;
+    int BytesPerPixel = 3;
+    int width = 600;
+    int height = 400;
+//    unsigned char Imagedata1[height][width][BytesPerPixel];//the size of House.raw
+//
+//    // Read image (filename specified by first argument) into image data matrix
+//    if (!(file1 = fopen(argv[1], "rb"))) {
+//        cout << "Cannot open file: " << argv[1] << endl;
+//        exit(1);
+//    }
+//    fread(Imagedata1, sizeof(unsigned char), width * height * BytesPerPixel, file1);
+//    fclose(file1);
+
+
+    ifstream file;
+    // Allocate image data array
+    file.open(argv[1],ios::in | ios::binary );
+    unsigned char ***Imagedata;
+    Imagedata=new unsigned char **[height];
+    int i,j,k;
+    int cnt=0;
+    for(i=0; i<height; i++)
+    {
+        Imagedata[i]=new unsigned char *[width];
+        for(j=0; j<width; j++) {
+            Imagedata[i][j] = new unsigned char[BytesPerPixel];
+            for (k = 0; k < BytesPerPixel; k++) {
+                file>>noskipws>>Imagedata[i][j][k];
+            }
+        }
+    }
+    file.close();
+
+
+
+////////////////////////////////////
+    //TODO: three steps
+    priority_queue<pixel,vector<pixel>,pixelCmp> mypq;
+    //1.RGB 2 YUV
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            RGB2YUV(Imagedata[i][j]);
+            pixel temp;
+            temp.position=make_pair(i,j);
+            temp.intensity=Imagedata[i][j][0];//push in Y value
+            mypq.push(temp);
+        }
+    }
+
+
+//    for(i=0;i<255;i++) cout<<data[i]<<endl;
+    //2. HE1
+
+    int buckets[256];
+
+    for(i=0;i<256;i++){
+        buckets[i]=(int)(floor(width*height/256.0*(i+1))-floor(width*height/256.0*i));
+    }
+    int currBuck=0;
+    //while(!mypq.empty()){
+    for(i=0;i<width*height;i++){
+        pixel temp=mypq.top();
+        mypq.pop();
+        Imagedata[temp.position.first][temp.position.second][0]=(unsigned char)currBuck;
+        buckets[currBuck]--;
+        if(buckets[currBuck]==0)currBuck++;
+        cnt++;
+    }
+    ofstream fileout;
+    fileout.open(argv[2],ios::binary);
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            YUV2RGB(Imagedata[i][j]);
+            //3.YUV 2 RGB
+            for (k = 0; k < BytesPerPixel; k++) {
+                fileout<<noskipws<<Imagedata[i][j][k];
+            }
+        }
+    }
+    fileout.close();
+
+
+    ////////////////////////////////////
+
+
+    /////////////////////////////////free the memory
+    for(i=0; i<height; i++)
+    {
+        for(j=0; j<width; j++)
+        {
+            delete [] Imagedata[i][j];
+        }
+    }
+    for(i=0; i<height; i++)
+    {
+        delete [] Imagedata[i];
+    }
+    delete [] Imagedata;
+    ////////////////////////////////////////
+    return 0;
+}
+
+
+
+
+
+//
+// Created by Administrator on 2022/1/25.
+//
+
+#include <stdio.h>
+#include <iostream>
+#include <stdlib.h>
+#include <fstream>
+#include <cmath>
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/highgui.hpp>
+//This file has new version of file input (dynamic memory, file stream. fread will fail, maybe because
+//the memory is not continue any more.
+using namespace std;
+using namespace cv;
+void RGB2YUV(unsigned char (*&RGB)){
+    unsigned char YUV[3];
+    YUV[0]=(unsigned char)(0.257*RGB[0]+0.504*RGB[1]+0.098*RGB[2]+16);
+    YUV[1]=(unsigned char)(-0.148*RGB[0]-0.291*RGB[1]+0.439*RGB[2]+128);
+    YUV[2]=(unsigned char)(0.439*RGB[0]-0.368*RGB[1]-0.071*RGB[2]+128);
+    for(int i=0;i<3;i++) RGB[i]=YUV[i];
+    //now the RGB[3] actually stores the YUV value
+}
+
+void YUV2RGB(unsigned char(*&YUV)){
+    unsigned char RGB[3];
+    RGB[0]=(unsigned char)(1.164*(YUV[0]-16)+1.596*(YUV[2]-128));
+    RGB[1]=(unsigned char)(1.164*(YUV[0]-16)-0.813*(YUV[2]-128)-0.391*(YUV[1]-128));
+    RGB[2]=(unsigned char)(1.164*(YUV[0]-16)+2.018*(YUV[1]-128));
+    for(int i=0;i<3;i++) YUV[i]=RGB[i];
+    //now stores the RGB values
+}
+
+//int main(int argc, char *argv[]){
+int main(){
+    //FILE *file;
+    ifstream file;
+    int BytesPerPixel = 3;
+    int width = 600;
+    int height = 400;
+
+    string argv[3];
+    argv[0]="";
+    argv[1]="images/Taj_Mahal.raw";
+    argv[2]="output/TajCLAHE.raw";
+
+
+    // Allocate image data array
+    file.open(argv[1],ios::in | ios::binary);
+    unsigned char ***Imagedata;
+    Imagedata=new unsigned char **[height];
+    int i,j,k;
+    int cnt=0;
+    for(i=0; i<height; i++)
+    {
+        Imagedata[i]=new unsigned char *[width];
+        for(j=0; j<width; j++) {
+            Imagedata[i][j] = new unsigned char[BytesPerPixel];
+            for (k = 0; k < BytesPerPixel; k++) {
+                file>>noskipws>>Imagedata[i][j][k];
+            }
+        }
+    }
+    file.close();
+
+    unsigned char Ychannel[width*height];
+    unsigned char newYchannel[width*height];
+
+
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            RGB2YUV(Imagedata[i][j]);
+            Ychannel[i*width+j]=Imagedata[i][j][0];
+        }
+    }
+
+    Mat img(height, width, CV_8UC1, Ychannel);
+    Mat newimg;
+////////////////////////////////////
+    //TODO: Opencv CLAHE
+    cv::Ptr<cv::CLAHE> myCLAHE=cv::createCLAHE();
+    myCLAHE->setClipLimit(2.5);//TODO: tune
+    myCLAHE->setTilesGridSize(Size(8,8));//TODO: tune
+    myCLAHE->apply(img,newimg);
+
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            newYchannel[i*width+j]=newimg.at<uchar>(i,j);
+        }
+    }
+
+//    while(1) {
+//        cv::imshow("Opencv CLAHE", img);
+//        if ( (char)27 == (char) waitKey(1) ) break;
+//    }
+
+
+    ofstream fileout;
+    fileout.open(argv[2],ios::binary);
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            Imagedata[i][j][0]=newYchannel[i*width+j];
+            //if(newYchannel[i*width+j]>250) cout<<i<<" "<<j<<endl;
+            YUV2RGB(Imagedata[i][j]);
+            //3.YUV 2 RGB
+            for (k = 0; k < BytesPerPixel; k++) {
+                fileout<<noskipws<<Imagedata[i][j][k];
+            }
+        }
+    }
+    fileout.close();
+
+//    ofstream fileout;
+//    fileout.open(argv[2],ios::binary);
+//    for(i=0; i<height; i++) {
+//        for(j=0; j<width; j++) {
+//            for (k = 0; k < BytesPerPixel; k++) {
+//                fileout<<Imagedata[i][j][k];
+//            }
+//        }
+//    }
+//    fileout.close();
+ ////////////////////////////////////
+
+
+    /////////////////////////////////free the memory
+    for(i=0; i<height; i++)
+    {
+        for(j=0; j<width; j++)
+        {
+            delete [] Imagedata[i][j];
+        }
+    }
+    for(i=0; i<height; i++)
+    {
+        delete [] Imagedata[i];
+    }
+    delete [] Imagedata;
+    ////////////////////////////////////////
+    return 0;
+}
+
+
+
+//
+// Created by Administrator on 2022/1/30.
+//
+#include <stdio.h>
+#include <iostream>
+#include <stdlib.h>
+#include <fstream>
+#include <cmath>
+#include <random>
+using namespace std;
+
+
+int main(int argc, char*argv[]){
+    ifstream file;
+    int BytesPerPixel = 1;
+    int width = 768;
+    int height = 512;
+
+    //FrostedGlassFilter input output color/gray N
+    if(argc!=5){
+        return -1;
+    }
+    BytesPerPixel=strtol(argv[3], nullptr,10);
+    int N=strtol(argv[4], nullptr,10);
+
+    // Allocate image data array
+    file.open(argv[1],ios::in | ios::binary);
+    unsigned char ***Imagedata;
+    unsigned char ***ImagedataOut;
+    Imagedata=new unsigned char **[height];
+    int i,j,k;
+    int cnt=0;
+    for(i=0; i<height; i++)
+    {
+        Imagedata[i]=new unsigned char *[width];
+        for(j=0; j<width; j++) {
+            Imagedata[i][j] = new unsigned char[BytesPerPixel];
+            for (k = 0; k < BytesPerPixel; k++) {
+                file>>noskipws>>Imagedata[i][j][k];
+            }
+        }
+    }
+    file.close();
+
+    ImagedataOut=new unsigned char **[height];
+    for(i=0; i<height; i++)
+    {
+        ImagedataOut[i]=new unsigned char *[width];
+        for(j=0; j<width; j++) {
+            ImagedataOut[i][j] = new unsigned char[BytesPerPixel];
+            for (k = 0; k < BytesPerPixel; k++) {
+                ImagedataOut[i][j][k]=Imagedata[i][j][k];
+            }
+        }
+    }
+
+
+
+    /////////////////////////////////////
+    //TODO:
+    std::random_device rd;  //Will be used to obtain a seed for the random number engine
+    std::mt19937 gen(rd());  //Standard mersenne_twister_engine seeded with rd()
+    uniform_int_distribution<> myRandom(-(N-1)/2,(N-1)/2);
+    int m,n;
+    for(i=(N-1)/2;i<height-(N-1)/2;i++){
+        for(j=(N-1)/2;j<width-(N-1)/2;j++) {
+            for(k=0;k<BytesPerPixel;k++){
+                ImagedataOut[i][j][k]=Imagedata[i+myRandom(gen)][j+myRandom(gen)][k];
+            }
+        }
+    }
+
+    ////////////////////////////////////////////////
+    ofstream fileout;
+    fileout.open(argv[2],ios::binary);
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                fileout<<noskipws<<ImagedataOut[i][j][k];
+            }
+        }
+    }
+    fileout.close();
+    /////////////////////////////////free the memory
+    for(i=0; i<height; i++)
+    {
+        for(j=0; j<width; j++)
+        {
+            delete [] Imagedata[i][j];
+            delete [] ImagedataOut[i][j];
+        }
+    }
+    for(i=0; i<height; i++)
+    {
+        delete [] Imagedata[i];
+        delete [] ImagedataOut[i];
+    }
+    delete [] Imagedata;
+    delete [] ImagedataOut;
+    ////////////////////////////////////////
+
+    return 0;
+}
+
+
+
+//
+// Created by Administrator on 2022/1/22.
+//
+#include <stdio.h>
+#include <iostream>
+#include <stdlib.h>
+#include <fstream>
+#include <cmath>
+using namespace std;
+void FOutputHistoData(int data[256], string str){
+    ofstream fileout;
+    fileout.open(str);
+    int i;
+    for(i=0;i<256;i++){
+        fileout<<data[i]<<endl;
+    }
+    fileout.close();
+}
+
+int main(int argc, char *argv[]) {
+    // Define file pointer and variables
+    FILE *file;
+    int BytesPerPixel=1;
+    int width = 256;
+    int height = 256;
+
+    // Check for proper syntax
+//    if (argc < 3) {
+//        cout << "Syntax Error - Incorrect Parameter Usage:" << endl;
+//        cout << "program_name input_image.raw output_image.raw [BytesPerPixel = 1] [Size = 256]" << endl;
+//        return 0;
+//    }
+
+    // Check if image is grayscale or color
+//    if (argc < 4) {
+//        BytesPerPixel = 1; // default is grey image
+//    } else {
+//        BytesPerPixel = atoi(argv[3]);
+//    }
+
+    // Allocate image data array
+    unsigned char Imagedata[height][width][BytesPerPixel];//the size of House.raw
+
+    // Read image (filename specified by first argument) into image data matrix
+    if (!(file = fopen(argv[1], "rb"))) {
+        cout << "Cannot open file: " << argv[1] << endl;
+        exit(1);
+    }
+    fread(Imagedata, sizeof(unsigned char), width * height * BytesPerPixel, file);
+    fclose(file);
+
+    ///////////////////////////////////////////////////////
+    //Todo: mycode 1.b.1&2
+    //generate the histogram data (output to a file, 256 lines, each line stores one intensity value)
+    int data[256]={0};
+    int i,j;
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            data[Imagedata[i][j][0]]+=1;
+        }
+    }
+    /*  ////////////////////////////output to file for py plot
+    ofstream fileout;
+    fileout.open("HatHistogram.txt");
+
+    for(i=0;i<256;i++){
+        fileout<<data[i]<<endl;
+    }
+    fileout.close();
+    *////////////////////////////////
+    double cumdata[256]={0};
+    cumdata[0]=data[0]/65536.0;
+    for(i=1;i<256;i++){
+        cumdata[i]=(data[i])/65536.0+cumdata[i-1];
+    }
+
+    int newCumData[256]={0};
+    for(i=0;i<256;i++){
+        newCumData[i]=(int)floor(cumdata[i]*255);
+    }
+
+    /*///////////////////////////////plot the transfer function
+    FOutputHistoData(newCumData,"TransferFuncHisto.txt");
+    *//////////////////////////////////
+
+    //////////generate new picture of Transfer function based manipulation
+
+    unsigned char ImageOutput1[height][width][BytesPerPixel];
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            ImageOutput1[i][j][0]=(unsigned char)newCumData[Imagedata[i][j][0]];
+        }
+    }
+
+    FILE *b2;
+    if (!(b2=fopen("output/MethodAEnhanced.raw","wb"))) {
+        cout << "Cannot open file: " << "output/MethodAEnhanced.raw" << endl;
+        exit(1);
+    }
+    fwrite(ImageOutput1, sizeof(unsigned char), width*height, b2);
+    fclose(b2);
+
+    /////////////////////////////////////////////////////////
+    return 0;
+}
+
+
+
+
+//
+// Created by Administrator on 2022/1/23.
+//
+
+#include <stdio.h>
+#include <iostream>
+#include <stdlib.h>
+#include <fstream>
+#include <cmath>
+#include <queue>
+using namespace std;
+typedef struct Pixel{
+    pair<int,int> position;
+    int intensity;
+}pixel;
+//bool pixelCmp(pixel a, pixel b){
+//    return a.intensity>b.intensity;
+//}
+struct pixelCmp{
+    bool operator()(pixel a,pixel b) {
+        return a.intensity > b.intensity;
+    }
+};
+
+void FOutputHistoData(int data[256], string str){
+    ofstream fileout;
+    fileout.open(str);
+    int i;
+    for(i=0;i<256;i++){
+        fileout<<data[i]<<endl;
+    }
+    fileout.close();
+}
+
+int main(int argc, char *argv[]) {
+    // Define file pointer and variables
+    FILE *file;
+    int BytesPerPixel = 1;
+    int width = 256;
+    int height = 256;
+
+    // Allocate image data array
+    unsigned char Imagedata[height][width][BytesPerPixel];//the size of House.raw
+
+    // Read image (filename specified by first argument) into image data matrix
+    if (!(file = fopen(argv[1], "rb"))) {
+        cout << "Cannot open file: " << argv[1] << endl;
+        exit(1);
+    }
+    fread(Imagedata, sizeof(unsigned char), width * height * BytesPerPixel, file);
+    fclose(file);
+
+    ///////////////////////////////////////////////////////
+    //Todo: mycode 1.b.3
+    //generate the histogram data (output to a file, 256 lines, each line stores one intensity value)
+    int i, j;
+    priority_queue<pixel,vector<pixel>,pixelCmp> mypq;
+
+    for (i = 0; i < height; i++) {
+        for (j = 0; j < width; j++) {
+            pixel temp;
+            temp.position=make_pair(i,j);
+            temp.intensity=Imagedata[i][j][0];
+            mypq.push(temp);
+        }
+    }
+
+     ////////////////////////////output to file for py plot
+    int data[256]={0};
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            data[Imagedata[i][j][0]]+=1;
+        }
+    }
+    for(i=1;i<256;i++) {
+        data[i]=data[i]+data[i-1];
+    }//now data stores the cumulative value
+
+    ofstream fileout;
+    fileout.open("HatCumHistoOri.txt");
+
+    for(i=0;i<256;i++){
+        fileout<<data[i]<<endl;
+    }
+    fileout.close();
+    for(i=0;i<256;i++){
+        data[i]=0;
+    }
+    ///////////////////////////////
+
+    unsigned char ImageOutput2[height][width][BytesPerPixel];
+
+    int buckets[256]={256};
+    for(i=0;i<256;i++){
+        buckets[i]=256;
+    }
+    int currBuck=0;int cnt=0;
+    while(!mypq.empty()){
+        pixel temp=mypq.top();
+        mypq.pop();
+        ImageOutput2[temp.position.first][temp.position.second][0]=(unsigned char)currBuck;
+        buckets[currBuck]--;data[currBuck]++;
+        if(buckets[currBuck]==0)currBuck++;
+        cnt++;
+    }
+
+
+    FILE *b3;
+    if (!(b3=fopen("output/MethodBEnhanced.raw","wb"))) {
+        cout << "Cannot open file: " << "output/MethodBEnhanced.raw" << endl;
+        exit(1);
+    }
+    fwrite(ImageOutput2, sizeof(unsigned char), width*height, b3);
+    fclose(b3);
+
+
+    ////////////////////////////output to file for py plot
+
+    for(i=1;i<256;i++) {
+        data[i]=data[i]+data[i-1];
+    }//now data stores the cumulative value
+
+    fileout.open("HatCumHistoEnh.txt");
+
+    for(i=0;i<256;i++){
+        fileout<<data[i]<<endl;
+    }
+    fileout.close();
+    ///////////////////////////////
+
+    return 0;
+}
+
+
+
+//
+// Created by Administrator on 2022/1/28.
+//
+//calculate the difference between source and noisy image, and output noise distribution to txt
+
+#include <stdio.h>
+#include <iostream>
+#include <fstream>
+#include <stdlib.h>
+#include <fstream>
+#include <cmath>
+#include <queue>
+using namespace std;
+
+void FOutputHistoData(int data[256], string str){
+    ofstream fileout;
+    fileout.open(str);
+    int i;
+    for(i=0;i<256;i++){
+        fileout<<data[i]<<endl;
+    }
+    fileout.close();
+}
+
+int main() {
+    // Define file pointer and variables
+    FILE *file;
+    int BytesPerPixel = 1;
+    int width = 768;
+    int height = 512;
+
+
+    // Allocate image data array
+    unsigned char ImagedataNoisy[height][width][BytesPerPixel];//the size of House.raw
+
+    // Read image (filename specified by first argument) into image data matrix
+    if (!(file = fopen("images/Flower_gray_noisy.raw", "rb"))) {//don't know why argv[1] doesn't work
+        cout << "Cannot open file: " << "images/Flower_gray_noisy.raw" << endl;
+        exit(1);
+    }
+    fread(ImagedataNoisy, sizeof(unsigned char), width * height * BytesPerPixel, file);
+    fclose(file);
+
+    unsigned char ImagedataSrc[height][width][BytesPerPixel];//the size of House.raw
+
+    // Read image (filename specified by first argument) into image data matrix
+    if (!(file = fopen("images/Flower_gray.raw", "rb"))) {//don't know why argv[1] doesn't work
+        cout << "Cannot open file: " << "images/Flower_gray.raw" << endl;
+        exit(1);
+    }
+    fread(ImagedataSrc, sizeof(unsigned char), width * height * BytesPerPixel, file);
+    fclose(file);
+
+    ////////////////////////////output to file for py plot
+    int i,j;
+    int data[256] = {0};
+    for (i = 0; i < height; i++) {
+        for (j = 0; j < width; j++) {
+            data[ImagedataNoisy[i][j][0]-ImagedataSrc[i][j][0]+120] += 1;
+        }
+    }
+
+    ofstream fileout;
+    fileout.open("Flower_gray_noise_Histo.txt");
+
+    for (i = 0; i < 256; i++) {
+        fileout << data[i] << endl;
+    }
+    fileout.close();
+
+
+
+}
+
+int main(){
+    generateHistoData();
+    return 0;
+}
+
+
+
+
+//
+// Created by Administrator on 2022/1/28.
+//
+
+#include <stdio.h>
+#include <iostream>
+#include <fstream>
+#include <stdlib.h>
+#include <fstream>
+#include <cmath>
+#include <queue>
+using namespace std;
+
+void applyFilter(unsigned char*** (&Imagedata), unsigned char*** (&ImagedataOut), int size){
+    int i,j;
+    int k,l;
+    int sum=0;
+    if(size==3){//1/9 Guass
+        for(i=1;i<511;i++) {
+            for(j=1;j<767;j++){
+                sum=(Imagedata[i-1][j-1][0]+Imagedata[i+1][j-1][0]+Imagedata[i-1][j+1][0]+Imagedata[i+1][j+1][0]+\
+                2*(Imagedata[i-1][j][0]+Imagedata[i+1][j][0]+Imagedata[i][j-1][0]+Imagedata[i][j+1][0])+\
+                4*Imagedata[i][j][0]);
+                ImagedataOut[i][j][0]=(unsigned char)round(sum/16);
+            }
+        }
+    }
+    if(size==5){//1/25 Guass
+        for(i=2;i<510;i++) {
+            for(j=2;j<766;j++){
+                sum=(Imagedata[i-2][j-2][0]+Imagedata[i+2][j-2][0]+Imagedata[i-2][j+2][0]+Imagedata[i+2][j+2][0]+\
+                4*(Imagedata[i-1][j-2][0]+Imagedata[i+1][j-2][0]+Imagedata[i-2][j-1][0]+Imagedata[i+2][j-1][0]+\
+                Imagedata[i-2][j+1][0]+Imagedata[i+2][j+1][0]+Imagedata[i-1][j+2][0]+Imagedata[i+1][j+2][0])+\
+                7*(Imagedata[i-2][j][0]+Imagedata[i+2][j][0]+Imagedata[i][j+2][0]+Imagedata[i][j-2][0])+\
+                16*(Imagedata[i-1][j-1][0]+Imagedata[i+1][j-1][0]+Imagedata[i-1][j+1][0]+Imagedata[i+1][j+1][0])+\
+                26*(Imagedata[i][j-1][0]+Imagedata[i][j+1][0]+Imagedata[i-1][j][0]+Imagedata[i+1][j][0])+\
+                41*Imagedata[i][j][0]);
+                ImagedataOut[i][j][0]=(unsigned char)round(sum/273);
+            }
+        }
+    }
+
+    unsigned char ImageOridata[512][768][1];//the size of House.raw
+    FILE *file;
+    // Read image (filename specified by first argument) into image data matrix
+    if (!(file = fopen("images/Flower_gray.raw", "rb"))) {
+        cout << "Cannot open file: " << "images/Flower_gray.raw" << endl;
+        exit(1);
+    }
+    fread(ImageOridata, sizeof(unsigned char),512*768*1, file);
+    fclose(file);
+
+    double MSE=0;
+    for(i=0;i<512;i++){
+        for(j=0;j<768;j++){
+            MSE+=pow((ImagedataOut[i][j][0]-ImageOridata[i][j][0]),2)/(768*512);
+        }
+    }
+    double PSNR=10*log10(255*255/MSE);
+    cout<<PSNR<<endl;
+}
+
+int main(int argc, char *argv[]) {
+    // Define file pointer and variables
+    ifstream file;
+    int BytesPerPixel = 1;
+    int width = 768;
+    int height = 512;
+
+    if(argc<4){
+        return -1;
+    }
+
+    // Allocate image data array
+    file.open(argv[1],ios::in | ios::binary);
+    unsigned char ***Imagedata;
+    unsigned char ***ImagedataOut;
+    Imagedata=new unsigned char **[height];
+    int i,j,k;
+    int cnt=0;
+    for(i=0; i<height; i++)
+    {
+        Imagedata[i]=new unsigned char *[width];
+        for(j=0; j<width; j++) {
+            Imagedata[i][j] = new unsigned char[BytesPerPixel];
+            for (k = 0; k < BytesPerPixel; k++) {
+                file>>noskipws>>Imagedata[i][j][k];
+            }
+        }
+    }
+    file.close();
+
+    ImagedataOut=new unsigned char **[height];
+    for(i=0; i<height; i++)
+    {
+        ImagedataOut[i]=new unsigned char *[width];
+        for(j=0; j<width; j++) {
+            ImagedataOut[i][j] = new unsigned char[BytesPerPixel];
+            for (k = 0; k < BytesPerPixel; k++) {
+                ImagedataOut[i][j][k]=Imagedata[i][j][k];
+            }
+        }
+    }
+    //////////////////////////////////
+    //TODO:
+    int size=atoi(argv[3]);
+    applyFilter(Imagedata,ImagedataOut,size);
+
+    //////////////////////////////////////
+
+    ofstream fileout;
+    fileout.open(argv[2],ios::binary);
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                fileout<<noskipws<<ImagedataOut[i][j][k];
+            }
+        }
+    }
+    fileout.close();
+
+    /////////////////////////////////free the memory
+    for(i=0; i<height; i++)
+    {
+        for(j=0; j<width; j++)
+        {
+            delete [] Imagedata[i][j];
+            delete [] ImagedataOut[i][j];
+        }
+    }
+    for(i=0; i<height; i++)
+    {
+        delete [] Imagedata[i];
+        delete [] ImagedataOut[i];
+    }
+    delete [] Imagedata;
+    delete [] ImagedataOut;
+    ////////////////////////////////////////
+
+    return 0;
+}
+
+
+
+//
+// Created by Administrator on 2022/1/28.
+//
+
+#include <stdio.h>
+#include <iostream>
+#include <fstream>
+#include <stdlib.h>
+#include <fstream>
+#include <cmath>
+#include <queue>
+using namespace std;
+
+void applyFilter(unsigned char*** (&Imagedata), unsigned char*** (&ImagedataOut), int size){
+    int i,j;
+    int k,l;
+    int sum=0;
+    if(size==3){//1/9 [1]
+        for(i=1;i<511;i++) {
+            for(j=1;j<767;j++){
+                sum=0;
+                for(k=-1;k<=1;k++){
+                    for(l=-1;l<=1;l++){
+                        sum+=Imagedata[i+k][j+l][0];
+                    }
+                }
+                ImagedataOut[i][j][0]=(unsigned char)round(sum/9);
+            }
+        }
+    }
+    if(size==5){//1/25 [1]
+        for(i=2;i<510;i++) {
+            for(j=2;j<766;j++){
+                sum=0;
+                for(k=-2;k<=2;k++){
+                    for(l=-2;l<=2;l++){
+                        sum+=Imagedata[i+k][j+l][0];
+                    }
+                }
+                ImagedataOut[i][j][0]=(unsigned char)round(sum/25);
+            }
+        }
+    }
+
+    unsigned char ImageOridata[512][768][1];//the size of House.raw
+    FILE *file;
+    // Read image (filename specified by first argument) into image data matrix
+    if (!(file = fopen("images/Flower_gray.raw", "rb"))) {
+        cout << "Cannot open file: " << "images/Flower_gray.raw" << endl;
+        exit(1);
+    }
+    fread(ImageOridata, sizeof(unsigned char),512*768*1, file);
+    fclose(file);
+
+    double MSE=0;
+    for(i=0;i<512;i++){
+        for(j=0;j<768;j++){
+            MSE+=pow((ImagedataOut[i][j][0]-ImageOridata[i][j][0]),2)/(768*512);
+        }
+    }
+    double PSNR=10*log10(255*255/MSE);
+    cout<<PSNR<<endl;
+}
+
+int main(int argc, char *argv[]) {
+    // Define file pointer and variables
+    ifstream file;
+    int BytesPerPixel = 1;
+    int width = 768;
+    int height = 512;
+
+    if(argc<4){
+        return -1;
+    }
+
+    // Allocate image data array
+    file.open(argv[1],ios::in | ios::binary);
+    unsigned char ***Imagedata;
+    unsigned char ***ImagedataOut;
+    Imagedata=new unsigned char **[height];
+    int i,j,k;
+    int cnt=0;
+    for(i=0; i<height; i++)
+    {
+        Imagedata[i]=new unsigned char *[width];
+        for(j=0; j<width; j++) {
+            Imagedata[i][j] = new unsigned char[BytesPerPixel];
+            for (k = 0; k < BytesPerPixel; k++) {
+                file>>noskipws>>Imagedata[i][j][k];
+            }
+        }
+    }
+    file.close();
+
+    ImagedataOut=new unsigned char **[height];
+    for(i=0; i<height; i++)
+    {
+        ImagedataOut[i]=new unsigned char *[width];
+        for(j=0; j<width; j++) {
+            ImagedataOut[i][j] = new unsigned char[BytesPerPixel];
+            for (k = 0; k < BytesPerPixel; k++) {
+                ImagedataOut[i][j][k]=Imagedata[i][j][k];
+            }
+        }
+    }
+    //////////////////////////////////
+    //TODO:
+    int size=atoi(argv[3]);
+    applyFilter(Imagedata,ImagedataOut,size);
+
+    //////////////////////////////////////
+
+    ofstream fileout;
+    fileout.open(argv[2],ios::binary);
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                fileout<<noskipws<<ImagedataOut[i][j][k];
+            }
+        }
+    }
+    fileout.close();
+
+    /////////////////////////////////free the memory
+    for(i=0; i<height; i++)
+    {
+        for(j=0; j<width; j++)
+        {
+            delete [] Imagedata[i][j];
+            delete [] ImagedataOut[i][j];
+        }
+    }
+    for(i=0; i<height; i++)
+    {
+        delete [] Imagedata[i];
+        delete [] ImagedataOut[i];
+    }
+    delete [] Imagedata;
+    delete [] ImagedataOut;
+    ////////////////////////////////////////
+
+    return 0;
+}
+
+
+//
+// Created by Administrator on 2022/1/29.
+//
+
+#include <stdio.h>
+#include <iostream>
+#include <stdlib.h>
+#include <fstream>
+#include <cmath>
+#include <opencv2/opencv.hpp>
+#include <opencv2/photo.hpp>
+#include <opencv2/photo/cuda.hpp>
+//This file has new version of file input (dynamic memory, file stream. fread will fail, maybe because
+//the memory is not continue any more.
+using namespace std;
+using namespace cv;
+
+int BytesPerPixel = 3;
+int width = 768;
+int height = 512;
+string argv[3];
+
+
+void analyzeNoise(unsigned char ***Imagedata, unsigned char ***ImagedataSrc){
+    ////////////////////////////output to file for py plot
+    int i,j;
+    int dataR[256*2];
+    int dataG[256*2];
+    int dataB[256*2];
+    for(i=0;i<256*2;i++) {dataR[i]=0;dataG[i]=0;dataB[i]=0;}
+    for (i = 0; i < height; i++) {
+        for (j = 0; j < width; j++) {
+           // cout<<(int)(Imagedata[i][j][0]-ImagedataSrc[i][j][0])<<endl;
+            dataR[Imagedata[i][j][0]-ImagedataSrc[i][j][0]+255] += 1;
+            dataG[Imagedata[i][j][1]-ImagedataSrc[i][j][1]+255] += 1;
+            dataB[Imagedata[i][j][2]-ImagedataSrc[i][j][2]+255] += 1;
+        }
+
+    }
+
+    ofstream fileout;
+    fileout.open("Flower_R_noise_Histo.txt");
+
+    for (i = 0; i < 256*2; i++) {
+        fileout << dataR[i] << endl;
+    }
+    fileout.close();
+
+    fileout.open("Flower_G_noise_Histo.txt");
+
+    for (i = 0; i < 256*2; i++) {
+        fileout << dataG[i] << endl;
+    }
+    fileout.close();
+
+    fileout.open("Flower_B_noise_Histo.txt");
+
+    for (i = 0; i < 256*2; i++) {
+        fileout << dataB[i] << endl;
+    }
+    fileout.close();
+}
+
+
+void Denoise(unsigned char ***Imagedata, unsigned char ***ImagedataSrc, unsigned char ***ImagedataOut){
+    ////////////////////////////////////////median filter
+    int i,j,k,l;
+    int m,n;
+    int cnt;
+    for(i=2;i<height-2;i++){
+        for(j=2;j<width-2;j++){
+            for(k=0;k<BytesPerPixel;k++){
+                if(abs(Imagedata[i][j][k]-ImagedataSrc[i][j][k])>10){
+                    //apply median filter of 5*5
+                    vector<unsigned char> array={};
+                    cnt=0;
+                    for(m=-2;m<=2;m++){
+                        for(n=-2;n<=2;n++){
+                            if(abs(Imagedata[i+m][j+n][k]-ImagedataSrc[i+m][j+n][k])<20)
+                                array.push_back(Imagedata[i+m][j+n][k]);
+                        }
+                    }
+                    if(!array.empty()){
+                        sort(array.begin(),array.end());
+                        unsigned char median = array[floor(array.size() / 2)];
+                        ImagedataOut[i][j][k] = median;
+                    }
+                }
+            }
+        }
+    }
+
+    Mat img(height,width,CV_8UC3);
+
+    for(i=0;i<height;i++) {
+        for (j = 0; j < width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                Imagedata[i][j][k]=ImagedataOut[i][j][k];
+                img.at<Vec3b>(i,j)[k]=Imagedata[i][j][k];
+            }
+        }
+    }
+    /////////////////////////////////////Gaussian, but do not have significant impact
+    /*
+    double sigmaC=4;
+    double sigmaS=100;
+    //8,0.1     https://people.csail.mit.edu/sparis/bf_course/course_notes.pdf
+    double w;
+    int size=9;
+    double numerator,denominator;
+    for(i=(size-1)/2;i<512-(size-1)/2;i++){
+        for(j=(size-1)/2;j<768-(size-1)/2;j++){
+            w=0;numerator=0;denominator=0;
+            for(k=i-(size-1)/2;k<=i+(size-1)/2;k++){
+                for(l=j-(size-1)/2;l<=j+(size-1)/2;l++){
+                    //if (k==i && l==j) continue;
+                    w=exp(-(pow(i-k,2)+pow(j-l,2))/(2*pow(sigmaC,2)) - pow(Imagedata[i][j][0]-Imagedata[k][l][0],2)/(2*pow(sigmaS,2)));
+                    denominator+=w;
+                    numerator+=Imagedata[k][l][0]*w;
+                }
+            }
+            ImagedataOut[i][j][0]=(unsigned char)floor(numerator/denominator);
+
+        }
+    }
+
+    for(i=0;i<height;i++) {
+        for (j = 0; j < width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                Imagedata[i][j][k]=ImagedataOut[i][j][k];
+                img.at<Vec3b>(i,j)[k]=Imagedata[i][j][k];
+            }
+        }
+    }
+    *//////////////////////////////////////// NLM
+
+    Mat newimg;
+    fastNlMeansDenoisingColored(img,newimg,10,10,3,21); //warning: different with opencv document
+
+    for(i=1;i<height-1;i++) {
+        for (j = 1; j < width - 1; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                ImagedataOut[i][j][k]=img.at<Vec3b>(i,j)[k];
+            }
+        }
+    }
+
+////////////////////////////////////
+}
+
+
+
+int main(){
+    // Allocate image data array
+    argv[0]="";
+    argv[1]="images/Flower_noisy.raw";
+    argv[2]="output/Flower_denoise.raw";
+
+    ifstream filenoisy,filesrc;
+    filenoisy.open("images/Flower_noisy.raw",ios::in | ios::binary);
+    filesrc.open("images/Flower.raw",ios::in | ios::binary);
+    unsigned char ***Imagedata;
+    unsigned char ***ImagedataSrc;
+    unsigned char ***ImagedataOut;
+    Imagedata=new unsigned char **[height];
+    ImagedataSrc=new unsigned char **[height];
+    ImagedataOut=new unsigned char **[height];
+    int i,j,k;
+    int cnt=0;
+    for(i=0; i<height; i++)
+    {
+        Imagedata[i]=new unsigned char *[width];
+        ImagedataSrc[i]=new unsigned char *[width];
+        ImagedataOut[i]=new unsigned char *[width];
+        for(j=0; j<width; j++) {
+            Imagedata[i][j] = new unsigned char[BytesPerPixel];
+            ImagedataSrc[i][j] = new unsigned char[BytesPerPixel];
+            ImagedataOut[i][j] = new unsigned char[BytesPerPixel];
+            for (k = 0; k < BytesPerPixel; k++) {
+                filenoisy>>noskipws>>Imagedata[i][j][k];
+                filesrc>>noskipws>>ImagedataSrc[i][j][k];
+                ImagedataOut[i][j][k]=Imagedata[i][j][k];
+            }
+        }
+    }
+    filenoisy.close();
+    filesrc.close();
+
+    ///////////////////////
+    //d.1
+    //analyzeNoise(Imagedata,ImagedataSrc);
+
+    //d.2
+    Denoise(Imagedata,ImagedataSrc,ImagedataOut);
+    ///////////////////////
+
+    ofstream fileout;
+    fileout.open("output/Flower_color_Denoise.raw",ios::binary);
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                fileout<<noskipws<<ImagedataOut[i][j][k];
+            }
+        }
+    }
+    fileout.close();
+
+    /////////////////////////////////free the memory
+    for(i=0; i<height; i++)
+    {
+        for(j=0; j<width; j++)
+        {
+            delete [] Imagedata[i][j];
+            delete [] ImagedataSrc[i][j];
+            delete [] ImagedataOut[i][j];
+        }
+    }
+    for(i=0; i<height; i++)
+    {
+        delete [] Imagedata[i];
+        delete [] ImagedataSrc[i];
+        delete [] ImagedataOut[i];
+    }
+    delete [] Imagedata;
+    delete [] ImagedataSrc;
+    delete [] ImagedataOut;
+    ////////////////////////////////////////
+}
+
+
+
+//
+// Created by Administrator on 2022/1/29.
+//
+
+#include <stdio.h>
+#include <iostream>
+#include <stdlib.h>
+#include <fstream>
+#include <cmath>
+#include <opencv2/opencv.hpp>
+#include <opencv2/photo.hpp>
+
+//This file has new version of file input (dynamic memory, file stream. fread will fail, maybe because
+//the memory is not continue any more.
+using namespace std;
+using namespace cv;
+
+//int main(int argc, char *argv[]){
+int main(){
+    //FILE *file;
+    ifstream file;
+    int BytesPerPixel = 1;
+    int width = 768;
+    int height = 512;
+
+    string argv[3];
+    argv[0]="";
+    argv[1]="images/Flower_gray_noisy.raw";
+    argv[2]="output/Flower_gray_NLM.raw";
+
+
+    // Allocate image data array
+    file.open(argv[1],ios::in | ios::binary);
+    unsigned char ***Imagedata;
+    Imagedata=new unsigned char **[height];
+    int i,j,k;
+    int cnt=0;
+    for(i=0; i<height; i++)
+    {
+        Imagedata[i]=new unsigned char *[width];
+        for(j=0; j<width; j++) {
+            Imagedata[i][j] = new unsigned char[BytesPerPixel];
+            for (k = 0; k < BytesPerPixel; k++) {
+                file>>noskipws>>Imagedata[i][j][k];
+            }
+        }
+    }
+    file.close();
+
+    unsigned char cvImg[width*height];
+
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            cvImg[i*width+j]=Imagedata[i][j][0];
+        }
+    }
+
+    Mat img(height, width, CV_8UC1, cvImg);
+    Mat newimg;
+////////////////////////////////////
+    //TODO:
+    cv::fastNlMeansDenoising(img,newimg,10,3,21);
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            Imagedata[i][j][0]=newimg.at<uchar>(i,j);
+        }
+    }
+
+    unsigned char ImageOridata[512][768][1];//the size of House.raw
+    FILE *file1;
+    // Read image (filename specified by first argument) into image data matrix
+    if (!(file1 = fopen("images/Flower_gray.raw", "rb"))) {
+        cout << "Cannot open file: " << "images/Flower_gray.raw" << endl;
+        exit(1);
+    }
+    fread(ImageOridata, sizeof(unsigned char),512*768*1, file1);
+    fclose(file1);
+
+    double MSE=0;
+    for(i=0;i<512;i++){
+        for(j=0;j<768;j++){
+            MSE+=pow((Imagedata[i][j][0]-ImageOridata[i][j][0]),2)/(768*512);
+        }
+    }
+    double PSNR=10*log10(255*255/MSE);
+    cout<<PSNR<<endl;
+
+//    while(1) {
+//        cv::imshow("Opencv CLAHE", img);
+//        if ( (char)27 == (char) waitKey(1) ) break;
+//    }
+
+
+    ofstream fileout;
+    fileout.open(argv[2],ios::binary);
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                fileout<<noskipws<<Imagedata[i][j][k];
+            }
+        }
+    }
+    fileout.close();
+
+//    ofstream fileout;
+//    fileout.open(argv[2],ios::binary);
+//    for(i=0; i<height; i++) {
+//        for(j=0; j<width; j++) {
+//            for (k = 0; k < BytesPerPixel; k++) {
+//                fileout<<Imagedata[i][j][k];
+//            }
+//        }
+//    }
+//    fileout.close();
+    ////////////////////////////////////
+
+
+    /////////////////////////////////free the memory
+    for(i=0; i<height; i++)
+    {
+        for(j=0; j<width; j++)
+        {
+            delete [] Imagedata[i][j];
+        }
+    }
+    for(i=0; i<height; i++)
+    {
+        delete [] Imagedata[i];
+    }
+    delete [] Imagedata;
+    ////////////////////////////////////////
+    return 0;
+}
+
+
+
+import sys
+import matplotlib.pyplot as plt
+#f=open("HatHistogram.txt")
+#f=open("TransferFuncHisto.txt")
+#f=open("HatCumHistoEnh.txt")
+#f=open("Flower_gray_noise_Histo.txt")
+f=open("Flower_B_noise_Histo.txt")
+data=[]
+temp=f.readline()
+while temp:
+   data.append(int(temp))
+   temp=f.readline()
+
+#plt.bar(range(len(data)), data,width=1.01)#avoid stripes
+#plt.bar(range(-120,256-120), data,width=1.01)
+plt.bar(range(-255,256*2-255), data,width=1.01)
+ax=plt.gca()
+#ax.xaxis.set_major_locator(plt.MultipleLocator(1))#调整x轴间距为1的倍数
+plt.xlim(-255,255)#调整x轴范围
+#ax.set_title("Hat.raw instensity histogram")
+#ax.set_title("1.b.2 transfer function histogram")
+#ax.set_title("1.b.3 Enhanced B Hat Cumulative histogram")
+#ax.set_title("noise distribution of flower gray")
+ax.set_title("Noise distribution of Flower.raw B channel")
+plt.show()
+

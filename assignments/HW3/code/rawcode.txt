@@ -1,0 +1,954 @@
+#include <iostream>
+#include "fileIO.h"
+#include <string>
+#include <cmath>
+
+
+unsigned char colorMapping(unsigned char***SourceImage, int j, int k, int channel,
+                  int BytesPerPixel=3,  int width=328, int height=328){
+    //EFFECT: give the position in the output wrapped image, return what vlue it should be
+    //(j,k) output image
+    //(x,y) output cart
+    //(u,v) input cart
+    //(p,q) input image
+
+    if(j<0 || j>height || k<0 || k>width){
+        cout<<"wrong output image coordinate"<<endl;
+        exit(-1);
+    }
+    double x,y;
+    x=k+0.5;
+    y=height-j-0.5;
+
+    double u=0,v=0;
+    if(y<=x && x+y<=328){//the bottom triangle
+        u=x;
+        v=-2.12035*x+3.12035*y+0.00646448*pow(x,2)-0.00646448*pow(y,2);
+    }
+    //TODO:
+    else if(y>=x && x+y<=328){
+        u=3.12872*x-2.12872*y-0.00652951*pow(x,2)+0.00648994*pow(y,2);
+        v=y;
+    }
+    else if(x<=y && x+y>=328){
+        u=x;
+        v=2.12035*x-1.12035*y-0.00646448*pow(x,2)+0.00646448*pow(y,2);
+    }
+    else if(x>=y && x+y>=328){
+        u=-1.12035*x+2.12035*y+0.00646448*pow(x,2)-0.00646448*pow(y,2);
+        v=y;
+    }
+    else{
+        u=x;
+        v=y;
+    }
+
+    double p,q;
+    p=height-v-0.5;
+    q=u-0.5;
+    if(p<0 ||p>height-1 || q<0 || q>width-1){
+        return 0;
+//        cout<<"wrong mapping to input image"<<endl;
+//        exit(-1);
+    }
+
+    //interpolation
+    int topleftI=floor(p);
+    int topleftJ=floor(q);
+    int mappedColor=floor(SourceImage[topleftI][topleftJ][channel]*(1-p+topleftI)*(1-q+topleftJ)+
+            (topleftI<p? SourceImage[topleftI+1][topleftJ][channel]*(p-topleftI)*(1-q+topleftJ) : 0)+
+            (topleftJ<q? SourceImage[topleftI][topleftJ+1][channel]*(1-p+topleftI)*(q-topleftJ) : 0)+
+            ((topleftI<p && topleftJ<q)? SourceImage[topleftI+1][topleftJ+1][channel]*(p-topleftI)*(q-topleftJ) : 0));
+
+    return (unsigned char)mappedColor;
+}
+
+void warpping(unsigned char***Imagedata, unsigned char***ImageOutput, int BytesPerPixel=3,  int width=328, int height=328){
+    int i,j,k;
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                ImageOutput[i][j][k]=colorMapping(Imagedata,i,j,k);
+            }
+        }
+    }
+    cout<<"finish warping"<<endl;
+}
+
+int main(int argc, char*argv[]) {
+    int BytesPerPixel = 3;
+    int width = 328;
+    int height = 328;
+    int i,j,k;
+    string PathInput=argv[1];
+    string PathOutput=argv[2];
+
+    unsigned char***ImageData=AllocateMem<unsigned char>(BytesPerPixel,width,height);
+    unsigned char***ImageOutput=AllocateMem<unsigned char>(BytesPerPixel,width,height);
+    LoadImage(ImageData,PathInput,BytesPerPixel,width,height);
+    warpping(ImageData,ImageOutput);
+
+    OutputImage(ImageOutput,PathOutput,BytesPerPixel,width,height);
+
+    FreeImage<unsigned char>(ImageData,BytesPerPixel,width,height);cout<<"here"<<endl;
+    FreeImage<unsigned char>(ImageOutput,BytesPerPixel,width,height);
+    return 0;
+}
+
+
+#include <iostream>
+#include "fileIO.h"
+#include <string>
+#include <cmath>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/features2d.hpp>
+#include "opencv2/calib3d/calib3d.hpp"
+#include "opencv2/stitching.hpp"
+
+using namespace std;
+using namespace cv;
+
+//Mat loadRaw(string pathString, int width=576, int height=432, int BytesPerPixel=3){
+//    FILE *fp;
+//    const char* path=pathString.c_str();
+//    fp = fopen(path,"rb+");
+//    char*data =(char*)malloc(width*height*BytesPerPixel* sizeof(char));
+//    //fread(data, sizeof(float),width*height,fp);
+//    fread(data,width*height*BytesPerPixel*sizeof(char),1,fp);
+//    Mat image;
+//    image.create(height,width,CV_8UC3);
+//    memcpy(image.data,data,width*height*BytesPerPixel*sizeof(char));
+//    return image;
+//}
+
+Mat loadRaw(string pathString, int width=576, int height=432, int BytesPerPixel=3){
+    FILE *fp;
+    const char* path=pathString.c_str();
+    fp = fopen(path,"rb+");
+    Mat image;
+    image.create(Size(width,height),CV_8UC3);
+    //char*data =(char*)malloc(width*height*BytesPerPixel* sizeof(char));
+    //fread(data, sizeof(float),width*height,fp);
+    fread(image.data,width*height*BytesPerPixel*sizeof(char),1,fp);
+    return image;
+}
+
+Mat keypointDetector(Mat image1,Mat image2) {
+    //https://cpp.hotexamples.com/zh/examples/-/BFMatcher/knnMatch/cpp-bfmatcher-knnmatch-method-examples.html
+    //cv::SiftFeatureDetector detector;
+    Ptr<SiftFeatureDetector> ptrDetector=SiftFeatureDetector::create();
+    std::vector<cv::KeyPoint> keypoints1,keypoints2;
+    ptrDetector->detect(image1, keypoints1);
+    ptrDetector->detect(image2, keypoints2);
+    cout<<keypoints1.size()<<endl;
+
+    Mat descriptor1,descriptor2;
+    Ptr<DescriptorExtractor> extractor=ORB::create();
+//    extractor->compute(image1, keypoints1, descriptor1);
+//    extractor->compute(image2, keypoints2, descriptor2);
+    extractor->detectAndCompute(image1, noArray(),keypoints1, descriptor1);
+    extractor->detectAndCompute(image2, noArray(),keypoints2, descriptor2);
+    cout<<"here2"<<endl;
+
+    BFMatcher matcher;
+    std::vector<vector< DMatch >> matches;
+    matcher.knnMatch(descriptor1,descriptor2,matches,2);
+    cout<<matches.size()<<endl;
+    cout<<"here3"<<endl;
+    std::vector< DMatch > good_matches;
+    int i;
+    for(i=0;i<matches.size();i++){
+        if(matches[i][0].distance<0.5*matches[i][1].distance){//adjust the ratio
+            good_matches.push_back(matches[i][0]);
+        }
+    }
+    cout<<good_matches.size()<<endl;
+
+    Mat img_matches;
+    drawMatches( image1, keypoints1, image2, keypoints2, good_matches, img_matches, Scalar::all(-1),
+                 Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS );
+    //imshow("good matches",img_matches);
+    //waitKey(0);
+
+    std::vector<Point2f> left;
+    std::vector<Point2f> middle;
+    for(i=0;i<good_matches.size();i++){
+        left.push_back(keypoints1[good_matches[i].queryIdx].pt);
+        middle.push_back(keypoints2[good_matches[i].trainIdx].pt);
+        cout<<keypoints1[good_matches[i].queryIdx].pt<<endl;
+        cout<<keypoints2[good_matches[i].trainIdx].pt<<endl;
+        cout<<endl;
+    }
+
+    Mat H = findHomography(left, middle,RANSAC);
+
+    return H;
+}
+
+unsigned char colorMapping(unsigned char***SourceImage, Mat H,int j, int k, int channel,
+                           int BytesPerPixel=3,  int width=576, int height=432){
+    //EFFECT: give the position in the output wrapped image, return what vlue it should be
+    //(j,k) output image
+    //(x,y) output cart
+    //(u,v) input cart
+    //(p,q) input image
+
+//    if(j<0 || j>height || k<0 || k>width){
+//        cout<<"wrong output image coordinate"<<endl;
+//        exit(-1);
+//    }
+    double x,y;
+    x=k+0.5;
+    y=height-j-0.5;
+
+    x=k;
+    y=j;
+
+    double u=0,v=0;
+    //TODO:
+    //double w2=H.at<double>(2,0)*x+H.at<double>(2,1)*y+H.at<double>(2,2);
+    Mat Hinv=H.inv();
+    double w2=1/(Hinv.at<double>(2,0)*x+Hinv.at<double>(2,1)*y+Hinv.at<double>(2,2));
+    u=Hinv.at<double>(0,0)*x*w2+Hinv.at<double>(0,1)*y*w2+Hinv.at<double>(0,2)*w2;
+    v=Hinv.at<double>(1,0)*x*w2+Hinv.at<double>(1,1)*y*w2+Hinv.at<double>(1,2)*w2;
+
+    double p,q;
+    p=height-v-0.5;
+    q=u-0.5;
+    p=v;
+    q=u;
+    if(p<0 ||p>height-1 || q<0 || q>width-1){
+        return 0;
+//        cout<<"wrong mapping to input image"<<endl;
+//        exit(-1);
+    }
+
+    //interpolation
+    int topleftI=floor(p);
+    int topleftJ=floor(q);
+    int mappedColor=floor(SourceImage[topleftI][topleftJ][channel]*(1-p+topleftI)*(1-q+topleftJ)+
+                          (topleftI<p? SourceImage[topleftI+1][topleftJ][channel]*(p-topleftI)*(1-q+topleftJ) : 0)+
+                          (topleftJ<q? SourceImage[topleftI][topleftJ+1][channel]*(1-p+topleftI)*(q-topleftJ) : 0)+
+                          ((topleftI<p && topleftJ<q)? SourceImage[topleftI+1][topleftJ+1][channel]*(p-topleftI)*(q-topleftJ) : 0));
+
+    return (unsigned char)mappedColor;
+}
+
+void warpping(unsigned char***Imagedata, unsigned char***ImageOutput, Mat H, int BytesPerPixel=3,  int width=328, int height=328){
+    int i,j,k;
+    cout<<H<<endl;
+//    for(i=0; i<height; i++) {
+//        for(j=0; j<width; j++) {
+//            for (k = 0; k < BytesPerPixel; k++) {
+//                ImageOutput[i][j][k]=colorMapping(Imagedata,H,i,j,k);
+//            }
+//        }
+//    }
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                ImageOutput[i][j][k]=colorMapping(Imagedata,H,i+100,j+100,k);
+            }
+        }
+    }
+    cout<<"finish warping"<<endl;
+}
+
+void stitching(vector<Mat> imgs){
+    Mat out;
+    Ptr<Stitcher> stitcher = Stitcher::create(Stitcher::PANORAMA);
+    Stitcher::Status status = stitcher->stitch(imgs, out);
+    imshow("stitching",out);
+    waitKey(0);
+}
+int main(){
+    string leftPath="raw_images/left.raw";
+    string middlePath="raw_images/middle.raw";
+    string rightPath="raw_images/right.raw";
+    string OutputPath="Output/lefttest.raw";
+
+    //laod raw with opencv cause color distortion
+    Mat leftImage=imread("raw_images/left.jpg");
+    Mat middleImage=imread("raw_images/middle.jpg");
+    Mat rightImage=imread("raw_images/right.jpg");
+    //cout<<leftImage<<endl;
+    //Mat H=keypointDetector(leftImage,middleImage);
+    Mat H=keypointDetector(rightImage,middleImage);
+
+
+    int BytesPerPixel = 3;
+    int width = 576;
+    int height = 432;
+    int i,j,k;
+    unsigned char***ImageData=AllocateMem<unsigned char>(BytesPerPixel,width,height);
+    unsigned char***ImageOutput=AllocateMem<unsigned char>(BytesPerPixel,width,height);
+    LoadImage(ImageData,middlePath,BytesPerPixel,width,height);
+    //warpping(ImageData,ImageOutput,H);
+    Mat ImgOut;
+
+
+    //warp left image
+//    warpPerspective(leftImage, ImgOut, H, leftImage.size(), INTER_NEAREST);
+//    imshow("out",ImgOut);
+//    waitKey(0);
+
+    //warp right image
+    warpPerspective(rightImage, ImgOut, H, rightImage.size(), INTER_NEAREST);
+    imshow("out",ImgOut);
+    waitKey(0);
+
+    //output my cdoe
+//    OutputImage(ImageOutput,OutputPath,BytesPerPixel,width,height);
+
+//opencv stithing
+//    vector<Mat> imgs;
+//    imgs.push_back(leftImage);
+//    imgs.push_back(middleImage);
+//    imgs.push_back(rightImage);
+//    stitching(imgs);
+
+    cout<<"here"<<endl;
+    FreeImage<unsigned char>(ImageData,BytesPerPixel,width,height);
+    FreeImage<unsigned char>(ImageOutput,BytesPerPixel,width,height);
+    return 0;
+}
+
+//reference
+//https://docs.opencv.org/3.4/d7/dff/tutorial_feature_homography.html
+//https://towardsdatascience.com/image-stitching-using-opencv-817779c86a83
+
+#include <iostream>
+#include "fileIO.h"
+#include <string>
+#include <cmath>
+#include <vector>
+#include <algorithm>
+
+void binarize(unsigned char***Imagedata,  int width, int height,int BytesPerPixel=1){
+    int i,j;
+    vector<unsigned char> list;
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            list.push_back(Imagedata[i][j][0]);
+        }
+    }
+    unsigned char max=*max_element(list.begin(),list.end());
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            if(Imagedata[i][j][0]<max/2)Imagedata[i][j][0]=0;
+            else Imagedata[i][j][0]=255;
+        }
+    }
+}
+
+unsigned char calculateNeighbour(unsigned char***Img,int i, int j,int k){
+    //REQUIRE: should not be boundary points
+    //cout<<(int)Img[i-1][j-1][k]<<endl;
+    return (Img[i-1][j-1][k]>0)+(Img[i-1][j][k]>0)*2+(Img[i-1][j+1][k]>0)*4+
+            (Img[i][j-1][k]>0)*8+(Img[i][j+1][k]>0)*16+
+            (Img[i+1][j-1][k]>0)*32+(Img[i+1][j][k]>0)*64+(Img[i+1][j+1][k]>0)*128;
+}
+void thinning(unsigned char***Imagedata,  int width, int height){
+    int i,j,k;
+    int cnt=0;
+    bool update= true;//record if any update happen in one iteration
+
+    unsigned char hitbox;
+    while(update){
+        k=0;
+        update=false;
+        for(i=1;i<height-1;i++){
+            for(j=1;j<width-1;j++){
+                hitbox=calculateNeighbour(Imagedata,i,j,k);
+                if(Imagedata[i][j][k]==255) {
+//                    if (hitbox>0)
+//                        cout<<(int)hitbox<<endl;
+                    if (hitbox == 18 || hitbox == 10 || hitbox == 72 || hitbox == 80 || //TK
+                        hitbox == 148 || hitbox == 7 || hitbox == 41 || hitbox == 224 ||//STK
+                        hitbox == 19 || hitbox == 146 || hitbox == 14 || hitbox == 84 ||//ST
+                        hitbox == 22 || hitbox == 11 || hitbox == 104 || hitbox == 208 ||//ST
+                        hitbox == 147 || hitbox == 46 ||//ST
+                        hitbox == 23 || hitbox == 150 || hitbox == 15 || hitbox == 43 || hitbox == 105 ||
+                        hitbox == 232 || hitbox == 240 || hitbox == 21 || //STK
+                        hitbox == 151 || hitbox == 47 || hitbox == 233 || hitbox == 244 ||//STK
+                        hitbox == 214 || hitbox == 31 || hitbox == 107 || hitbox == 248 ||//STK
+                        hitbox == 215 || hitbox == 246 || hitbox == 63 || hitbox == 159 || hitbox == 121 ||
+                        hitbox == 235 || hitbox == 249 || hitbox == 252 || //STK
+                        hitbox == 247 || hitbox == 191 || hitbox == 239 || hitbox == 253)//STK
+                        //hitbox==254 ||hitbox==127 || hitbox==251 ||hitbox==223
+                        Imagedata[i][j][1] = 1;
+                    else  Imagedata[i][j][1]=0;
+                }
+                else  Imagedata[i][j][1]=0;
+            }
+        }
+
+        k=1; //M matrix
+        for(i=1;i<height-1;i++){
+            for(j=1;j<width-1;j++){
+                hitbox=calculateNeighbour(Imagedata,i,j,k);
+                if (Imagedata[i][j][k]==1) {
+                    //TODO
+                    if(!(hitbox == 4 || hitbox == 2 || hitbox == 64 || hitbox == 16 ||
+                       hitbox == 20 || hitbox == 5 || hitbox == 3 || hitbox == 9 ||
+                       hitbox == 40 || hitbox == 96 || hitbox == 192 || hitbox == 144 ||
+                       hitbox == 14 || hitbox == 19 || hitbox == 146 || hitbox == 84 ||
+                       hitbox == 38 || hitbox == 137 ||
+                       hitbox == 44 || hitbox == 193 || hitbox == 52 || hitbox == 131 || hitbox == 100 ||
+                       hitbox == 145 || hitbox == 255 || hitbox == 59 ||
+                       hitbox == 158 || hitbox == 220 || hitbox == 121 || hitbox == 79 ||
+                       hitbox == 234 || hitbox == 242 || hitbox == 87 || hitbox == 179 ||
+                       hitbox == 174 || hitbox == 205 || hitbox == 117 || hitbox == 38 || hitbox == 52 ||
+                       hitbox == 54 || hitbox == 131 || hitbox == 137 ||
+                       hitbox == 139 || hitbox == 44 || hitbox == 100 || hitbox == 108 ||
+                       hitbox == 145 || hitbox == 193 || hitbox == 209 || hitbox == 11 ||
+                       hitbox == 26 || hitbox == 59 || hitbox == 26 || hitbox == 158 ||
+                       hitbox == 88 || hitbox == 220 || hitbox == 24 || hitbox == 57 ||
+                       hitbox ==37 || hitbox==69 || hitbox==133 || hitbox==101 || hitbox==165 || hitbox==197 || hitbox==229 ||
+                       hitbox ==49 || hitbox ==161 || hitbox==53 || hitbox==165 || hitbox==177 || hitbox==181 ||
+                       hitbox ==161 || hitbox==162 || hitbox==164 || hitbox==165 || hitbox==163 || hitbox==166 || hitbox==167 ||
+                       hitbox==133 || hitbox==140 || hitbox==164 || hitbox==141 || hitbox==173 ||
+                       hitbox==223 || hitbox==191 || hitbox==127 || hitbox==159 || hitbox==95 || hitbox==63 ||
+                       hitbox==251 || hitbox==239 || hitbox==235 || hitbox==123 ||hitbox==111 ||
+                       hitbox==254 || hitbox==253 || hitbox==252 || hitbox==251 || hitbox==250 || hitbox==249 ||
+                       hitbox==247 || hitbox==223 || hitbox==246 || hitbox==222 || hitbox==215 ||
+                       hitbox==50 || hitbox==138 || hitbox==76|| hitbox==81 ||
+                       hitbox==15 || hitbox==27 || hitbox==139 ||hitbox==75 ||hitbox==43 ||
+                       hitbox==31 || hitbox==63 || hitbox==47 || hitbox==107 ||hitbox==111 || hitbox==123||
+                       hitbox==27 || hitbox==58 || hitbox==30 || hitbox==154 ||
+                       hitbox==114 ||hitbox==60 || hitbox==184 ||hitbox==57 ||hitbox==60 ||
+                       hitbox==75 || hitbox==78 || hitbox==106 || hitbox==202 ||
+                       hitbox==210 || hitbox==83 ||hitbox==86 )
+                       //hitbox==22 || hitbox==208 ||hitbox==104
+                       ) {
+                        //what a fucking stupid problem
+                        Imagedata[i][j][0] = 0;
+                        update=true;
+                    }
+                }
+            }
+        }
+        cnt++;
+        if(cnt==20){
+            OutputImage(Imagedata,"Output/thinspringInter.raw",1,width,height);
+        }
+
+    }
+    cout<<cnt<<endl;
+
+}
+
+int main(int argc, char*argv[]) {
+    int BytesPerPixel = 1;
+    int width = stol(argv[3]);
+    int height = stol(argv[3]);//a square image
+    int i,j,k;
+    string PathInput=argv[1];
+    string PathOutput=argv[2];
+
+    unsigned char***ImageData=AllocateMem<unsigned char>(3,width,height);
+    unsigned char***ImageOutput=AllocateMem<unsigned char>(BytesPerPixel,width,height);
+    LoadImage(ImageData,PathInput,BytesPerPixel,width,height);
+
+    binarize(ImageData,width,height);
+    thinning(ImageData,width,height);
+    OutputImage(ImageData,PathOutput,BytesPerPixel,width,height);
+
+    FreeImage<unsigned char>(ImageData,3,width,height);
+    FreeImage<unsigned char>(ImageOutput,BytesPerPixel,width,height);
+    return 0;
+}
+
+#include <iostream>
+#include "fileIO.h"
+#include <string>
+#include <cmath>
+#include <vector>
+#include <algorithm>
+#include <queue>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc.hpp>
+
+using namespace cv;
+
+void binarize(unsigned char***Imagedata,  int width, int height,int BytesPerPixel=1){
+    int i,j;
+    vector<unsigned char> list;
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            list.push_back(Imagedata[i][j][0]);
+        }
+    }
+    unsigned char max=*max_element(list.begin(),list.end());
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            if(Imagedata[i][j][0]<128)Imagedata[i][j][0]=0;
+            else Imagedata[i][j][0]=255;
+        }
+    }
+}
+
+void defectDetection(unsigned char***img,  int width, int height,int BytesPerPixel=1){
+
+    bool searched[height][width];
+    vector<int> islandsSize;
+
+    int i,j;
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            searched[i][j]= false;
+        }
+    }
+
+    queue<pair<int,int>> q;
+    int cnt;//count the size of each island
+
+    for(j=0;j<width;j++){//from left to right instead of up to down. To facilitate counting beans
+        for(i=0;i<height;i++){
+            if(!searched[i][j]){
+                if(img[i][j][0]==0) {
+                    q.push(make_pair(i, j));
+                    cnt=1;
+                    while(!q.empty()){
+                        int m=q.front().first;
+                        int n=q.front().second;
+                        q.pop();
+                        if(m-1>=0 && !searched[m-1][n] && img[m-1][n][0]==0){//unserached connected black
+                            q.push(make_pair(m-1,n));
+                            searched[m-1][n]=true;
+                            cnt++;
+                        }
+                        if(n-1>=0 && !searched[m][n-1] && img[m][n-1][0]==0){//unserached connected black
+                            q.push(make_pair(m,n-1));
+                            searched[m][n-1]=true;
+                            cnt++;
+                        }
+                        if(m+1<height && !searched[m+1][n] && img[m+1][n][0]==0){//unserached connected black
+                            q.push(make_pair(m+1,n));
+                            searched[m+1][n]=true;
+                            cnt++;
+                        }
+                        if(n+1<width && !searched[m][n+1] && img[m][n+1][0]==0){//unserached connected black
+                            q.push(make_pair(m,n+1));
+                            searched[m][n+1]=true;
+                            cnt++;
+                        }
+                    }
+                    islandsSize.push_back(cnt);
+                }
+                else{
+                    searched[i][j]=true;
+                }
+            }
+        }
+    }
+
+    vector<int>::iterator iter=islandsSize.begin();
+    while(iter!=islandsSize.end()){
+        if(*iter>50){
+            islandsSize.erase(iter);
+        }
+        else iter++;
+    }
+    for(auto iter2:islandsSize) cout<<iter2<<endl;
+    cout<<islandsSize.size()<<endl;
+}
+
+void closing(unsigned char***img,  int width, int height,int BytesPerPixel=1){
+    Mat imgMat=Mat(height,width,CV_8UC1);
+    int i,j;
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            imgMat.at<unsigned char>(i,j)=img[i][j][0];
+        }
+    }
+    int morph_size=2;
+    Mat element = getStructuringElement(
+            MORPH_RECT,
+            Size(2 * morph_size + 1,
+                 2 * morph_size + 1),
+            Point(morph_size, morph_size));
+    Mat output;
+    morphologyEx(imgMat, output,
+                 MORPH_CLOSE, element,
+                 Point(-1, -1), 2);
+//    imshow("closing",output);
+//    waitKey(0);
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            img[i][j][0]=output.at<unsigned char>(i,j);
+        }
+    }
+}
+
+
+
+int main(){
+    int BytesPerPixel = 1;
+    int width = 550;
+    int height = 691;
+    int i,j,k;
+    string PathInput="raw_images/deer.raw";
+    //string PathOutput=argv[2];
+
+    unsigned char***ImageData=AllocateMem<unsigned char>(BytesPerPixel,width,height);
+    unsigned char***ImageOutput=AllocateMem<unsigned char>(BytesPerPixel,width,height);
+    LoadImage(ImageData,PathInput,BytesPerPixel,width,height);
+    binarize(ImageData,width,height,BytesPerPixel);
+    defectDetection(ImageData,width,height,BytesPerPixel);
+
+    closing(ImageData,width,height,BytesPerPixel);
+    OutputImage(ImageData,"Output/repairedDeer.raw",BytesPerPixel,width,height);
+    cout<<"finished"<<endl;
+    FreeImage<unsigned char>(ImageData,BytesPerPixel,width,height);
+    FreeImage<unsigned char>(ImageOutput,BytesPerPixel,width,height);
+    return 0;
+}
+
+
+#include <iostream>
+#include "fileIO.h"
+#include <string>
+#include <cmath>
+#include <vector>
+#include <algorithm>
+#include <queue>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc.hpp>
+
+using namespace std;
+using namespace cv;
+
+void binarize(unsigned char***Imagedata,  int width, int height){
+    int i,j;
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            Imagedata[i][j][0]=(unsigned char)((Imagedata[i][j][0]+Imagedata[i][j][1]+Imagedata[i][j][2])/3);
+        }
+    }
+
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            if(Imagedata[i][j][0]<240)Imagedata[i][j][0]=0;
+            else Imagedata[i][j][0]=255;
+        }
+    }
+}
+
+void defectDetection(unsigned char***img,  int width, int height,int BytesPerPixel=1){
+
+    bool searched[height][width];
+    vector<int> islandsSize;
+
+    int i,j;
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            searched[i][j]= false;
+        }
+    }
+
+    queue<pair<int,int>> q;
+    int cnt;//count the size of each island
+
+    for(j=0;j<width;j++){//from left to right instead of up to down. To facilitate counting beans
+        for(i=0;i<height;i++){
+            if(!searched[i][j]){
+                if(img[i][j][0]==0) {
+                    q.push(make_pair(i, j));
+                    cnt=1;
+                    while(!q.empty()){
+                        int m=q.front().first;
+                        int n=q.front().second;
+                        q.pop();
+                        if(m-1>=0 && !searched[m-1][n] && img[m-1][n][0]==0){//unserached connected black
+                            q.push(make_pair(m-1,n));
+                            searched[m-1][n]=true;
+                            cnt++;
+                        }
+                        if(n-1>=0 && !searched[m][n-1] && img[m][n-1][0]==0){//unserached connected black
+                            q.push(make_pair(m,n-1));
+                            searched[m][n-1]=true;
+                            cnt++;
+                        }
+                        if(m+1<height && !searched[m+1][n] && img[m+1][n][0]==0){//unserached connected black
+                            q.push(make_pair(m+1,n));
+                            searched[m+1][n]=true;
+                            cnt++;
+                        }
+                        if(n+1<width && !searched[m][n+1] && img[m][n+1][0]==0){//unserached connected black
+                            q.push(make_pair(m,n+1));
+                            searched[m][n+1]=true;
+                            cnt++;
+                        }
+                    }
+                    islandsSize.push_back(cnt);
+                }
+                else{
+                    searched[i][j]=true;
+                }
+            }
+        }
+    }
+
+    for(auto i : islandsSize){
+        cout<<i<<endl;
+    }
+    cout<<islandsSize.size()<<endl;
+}
+
+//void toGrey(unsigned char***src, unsigned char***dst, int width=494,int height=82){
+//    int i,j,k;
+//    for(i=0;i<height;i++){
+//        for(j=0;j<width;j++){
+//            dst[i][j][0]=(unsigned char)((src[i][j][0]+src[i][j][1]+src[i][j][2])/3);
+//        }
+//    }
+//}
+
+void closing(unsigned char***img,  int width, int height,int BytesPerPixel=1){
+    Mat imgMat=Mat(height,width,CV_8UC1);
+    int i,j;
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            imgMat.at<unsigned char>(i,j)=img[i][j][0];
+        }
+    }
+    int morph_size=2;
+    Mat element = getStructuringElement(
+            MORPH_RECT,
+            Size(2 * morph_size + 1,
+                 2 * morph_size + 1),
+            Point(morph_size, morph_size));
+    Mat output;
+    morphologyEx(imgMat, output,
+                 MORPH_CLOSE, element,
+                 Point(-1, -1), 2);
+//    imshow("closing",output);
+//    waitKey(0);
+    for(i=0;i<height;i++){
+        for(j=0;j<width;j++){
+            img[i][j][0]=output.at<unsigned char>(i,j);
+        }
+    }
+}
+
+int main(){
+    int BytesPerPixel = 3;
+    int width = 494;
+    int height = 82;
+    int i,j,k;
+    string PathInput="raw_images/beans.raw";
+    //string PathOutput=argv[2];
+
+    unsigned char***ImageData=AllocateMem<unsigned char>(BytesPerPixel,width,height);
+    unsigned char***ImageGray=AllocateMem<unsigned char>(1,width,height);
+    unsigned char***ImageOutput=AllocateMem<unsigned char>(BytesPerPixel,width,height);
+    LoadImage(ImageData,PathInput,BytesPerPixel,width,height);
+    binarize(ImageData,width,height);//now it still has three channel, the first one is gray, the other two are wasted
+
+    //OutputImage(ImageData,"Output/beantest.raw",1,width,height);
+    closing(ImageData,width,height);
+    defectDetection(ImageData,width,height,BytesPerPixel);
+
+    cout<<"finished"<<endl;
+    FreeImage<unsigned char>(ImageData,BytesPerPixel,width,height);
+    FreeImage<unsigned char>(ImageOutput,BytesPerPixel,width,height);
+    FreeImage<unsigned char>(ImageGray,1,width,height);
+    return 0;
+}
+
+#ifndef EE569_HW3_8831981929_HANYUNZHAO_FILEIO_H
+#define EE569_HW3_8831981929_HANYUNZHAO_FILEIO_H
+#include <stdio.h>
+#include <iostream>
+#include <fstream>
+#include <stdlib.h>
+#include <fstream>
+#include <string>
+using namespace std;
+
+//unsigned char *** AllocateMem(int=3, int=481, int=321);
+//
+//double *** AllocateMemDouble(int=3, int=481, int height=321);
+template<typename T> T *** AllocateMem(int BytesPerPixel=3, int width=481, int height=321){
+    // Allocate image data array
+    T ***Imagedata;
+    Imagedata=new T **[height];
+    int i,j,k;
+    int cnt=0;
+    for(i=0; i<height; i++)
+    {
+        Imagedata[i]=new T *[width];
+        for(j=0; j<width; j++) {
+            Imagedata[i][j] = new T[BytesPerPixel];
+            for(k=0;k<BytesPerPixel;k++){
+                Imagedata[i][j][k]=0;
+            }
+        }
+    }
+    return Imagedata;
+}
+
+
+//void LoadImage(unsigned char ***, string, int=3, int=481, int=321);
+void LoadImage(unsigned char ***Imagedata, string FilePath,int BytesPerPixel=3,  int width=481, int height=321){
+    ifstream file;
+    file.open(FilePath,ios::in | ios::binary);
+    int i,j,k;
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                file>>noskipws>>Imagedata[i][j][k];
+            }
+        }
+    }
+    file.close();
+}
+
+//void ImageOutput(unsigned char ***, string, int=3 , int=481, int=321);
+void OutputImage(unsigned char ***ImagedataOut,string FilePath, int BytesPerPixel=3,  int width=481, int height=321){
+    ofstream fileout;
+    int i,j,k;
+    fileout.open(FilePath,ios::binary);
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                fileout<<noskipws<<ImagedataOut[i][j][k];
+            }
+        }
+    }
+    fileout.close();
+}
+
+//template<typename T> void FreeImage(T ***, int=3, int=481, int=321);
+template<typename T> void FreeImage(T ***Imagedata, int BytesPerPixel=3, int width=481, int height=321){
+    int i,j,k;
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++){
+            delete [] Imagedata[i][j];
+        }
+    }
+    for(i=0; i<height; i++) {
+        delete [] Imagedata[i];
+    }
+    delete [] Imagedata;
+}
+
+//opencv load raw image
+//Mat loadRaw(string pathString, int width=576, int height=432, int BytesPerPixel=3){
+//    FILE *fp;
+//    const char* path=pathString.c_str();
+//    fp = fopen(path,"rb+");
+//    char*data =(char*)malloc(width*height*BytesPerPixel* sizeof(char));
+//    //fread(data, sizeof(float),width*height,fp);
+//    fread(data,width*height*BytesPerPixel*sizeof(char),1,fp);
+//    Mat image;
+//    image.create(height,width,CV_8UC3);
+//    memcpy(image.data,data,width*height*BytesPerPixel*sizeof(char));
+//    return image;
+//}
+
+#endif //EE569_HW3_8831981929_HANYUNZHAO_FILEIO_H
+
+
+#include <iostream>
+#include "fileIO.h"
+#include <string>
+#include <cmath>
+
+
+unsigned char colorMapping(unsigned char***SourceImage, int j, int k, int channel,
+                           int BytesPerPixel=3,  int width=328, int height=328){
+    //EFFECT: give the position in the output wrapped image, return what vlue it should be
+    //(j,k) output image
+    //(x,y) output cart
+    //(u,v) input cart
+    //(p,q) input image
+
+    if(j<0 || j>height || k<0 || k>width){
+        cout<<"wrong output image coordinate"<<endl;
+        exit(-1);
+    }
+    double x,y;
+    x=k+0.5;
+    y=height-j-0.5;
+
+    double u=0,v=0;
+    if(y<=x && x+y<=328){//the bottom triangle
+        u=x;
+        //v=(0.679517*x+0.320474*y)<164?(0.679517*x+0.320474*y):sqrt(abs(-0.00140777*x-0.000663931*y));
+        //pseudoinverse failed
+        v=0.785269*x+0.214731*y-0.00238411*pow(x,2)+0.00239411*pow(y,2);
+    }
+        //TODO:
+    else if(y>=x && x+y<=328){//left
+        u=0.214731*x+0.785269*y+0.00239411*pow(x,2)-0.00238411*pow(y,2);
+        v=y;
+    }
+    else if(x<=y && x+y>=328){//top
+        u=x;
+        v=-0.785269*x+1.78527*y+0.00239411*pow(x,2)-0.00238411*pow(y,2);
+    }
+    else if(x>=y && x+y>=328){//right
+        u=1.78527*x-0.785269*y-0.00239411*pow(x,2)+0.00239411*pow(y,2);
+        v=y;
+    }
+    else{
+        u=x;
+        v=y;
+    }
+
+    double p,q;
+    p=height-v-0.5;
+    q=u-0.5;
+    if(p<0 ||p>height-1 || q<0 || q>width-1){
+        return 0;
+//        cout<<"wrong mapping to input image"<<endl;
+//        exit(-1);
+    }
+
+    //interpolation
+    int topleftI=floor(p);
+    int topleftJ=floor(q);
+    int mappedColor=floor(SourceImage[topleftI][topleftJ][channel]*(1-p+topleftI)*(1-q+topleftJ)+
+                          (topleftI<p? SourceImage[topleftI+1][topleftJ][channel]*(p-topleftI)*(1-q+topleftJ) : 0)+
+                          (topleftJ<q? SourceImage[topleftI][topleftJ+1][channel]*(1-p+topleftI)*(q-topleftJ) : 0)+
+                          ((topleftI<p && topleftJ<q)? SourceImage[topleftI+1][topleftJ+1][channel]*(p-topleftI)*(q-topleftJ) : 0));
+
+    return (unsigned char)mappedColor;
+}
+
+void warpping(unsigned char***Imagedata, unsigned char***ImageOutput, int BytesPerPixel=3,  int width=328, int height=328){
+    int i,j,k;
+    for(i=0; i<height; i++) {
+        for(j=0; j<width; j++) {
+            for (k = 0; k < BytesPerPixel; k++) {
+                ImageOutput[i][j][k]=colorMapping(Imagedata,i,j,k);
+            }
+        }
+    }
+    cout<<"finish warping"<<endl;
+}
+
+int main(int argc, char*argv[]) {
+    int BytesPerPixel = 3;
+    int width = 328;
+    int height = 328;
+    int i,j,k;
+    string PathInput=argv[1];
+    string PathOutput=argv[2];
+
+    unsigned char***ImageData=AllocateMem<unsigned char>(BytesPerPixel,width,height);
+    unsigned char***ImageOutput=AllocateMem<unsigned char>(BytesPerPixel,width,height);
+    LoadImage(ImageData,PathInput,BytesPerPixel,width,height);
+    warpping(ImageData,ImageOutput);
+
+    OutputImage(ImageOutput,PathOutput,BytesPerPixel,width,height);
+
+    FreeImage<unsigned char>(ImageData,BytesPerPixel,width,height);cout<<"here"<<endl;
+    FreeImage<unsigned char>(ImageOutput,BytesPerPixel,width,height);
+    return 0;
+}
+
+
